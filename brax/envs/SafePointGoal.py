@@ -18,14 +18,21 @@ from brax.envs.base import PipelineEnv, State
 # Construct absolute path to point_hazard_goal.xml
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 
-def get_xml_path_for_hazards(num_hazards: int) -> str:
-    """Get the appropriate XML file path for the given number of hazards."""
-    # Available XML files with different hazard counts
-    available_configs = {
-        3: 'point_hazard_goal_mocap.xml',      # Original 3 hazards
-        4: 'point_hazard_goal_mocap_4.xml',     # 4 hazards
-        8: 'point_hazard_goal_mocap_8.xml',     # 8 hazards
-    }
+def get_xml_path_for_hazards(num_hazards: int, hazard_type: str = "cubes") -> str:
+    """Get the appropriate XML file path for the given number of hazards and hazard type."""
+    # Available XML files with different hazard counts and types
+    if hazard_type == "cylinders":
+        available_configs = {
+            4: 'point_cylinder_hazard_goal_mocap_4.xml',    # 4 cylinder hazards
+            8: 'point_cylinder_hazard_goal_mocap_8.xml',    # 8 cylinder hazards
+            12: 'point_cylinder_hazard_goal_mocap_12.xml',  # 12 cylinder hazards
+        }
+    else:  # Default to cubes
+        available_configs = {
+            4: 'point_hazard_goal_mocap_4.xml',     # 4 hazards
+            8: 'point_hazard_goal_mocap_8.xml',     # 8 hazards
+            12: 'point_hazard_goal_mocap_12.xml',   # 12 hazards
+        }
 
     # Find the closest available configuration
     if num_hazards in available_configs:
@@ -35,16 +42,17 @@ def get_xml_path_for_hazards(num_hazards: int) -> str:
         available_counts = sorted(available_configs.keys())
         closest_count = min(available_counts, key=lambda x: abs(x - num_hazards))
         xml_filename = available_configs[closest_count]
-        print(f"Warning: No exact XML config for {num_hazards} hazards, using {closest_count} hazards instead")
+        print(f"Warning: No exact XML config for {num_hazards} {hazard_type} hazards, using {closest_count} hazards instead")
 
     return os.path.join(_current_dir, 'assets', xml_filename)
 
 
-def default_config(num_hazards: int = 8) -> config_dict.ConfigDict:
+def default_config(num_hazards: int = 8, hazard_type: str = "cubes") -> config_dict.ConfigDict:
     """Returns the default config for SafePointGoal environment."""
     config = config_dict.create(
         # Environment settings
         num_hazards=num_hazards,           # Number of hazards (configurable)
+        hazard_type=hazard_type,           # Type of hazards: "cubes" or "cylinders"
         hazard_size=0.3,                   # Smaller hazard size (was 0.7)
 
         # Goal settings
@@ -111,11 +119,12 @@ class SafePointGoal(PipelineEnv):
         self,
         config: config_dict.ConfigDict = None,
         num_hazards: int = 8,
+        hazard_type: str = "cubes",
         **kwargs,
     ):
         # Use provided config or create default
         if config is None:
-            config = default_config(num_hazards)
+            config = default_config(num_hazards, hazard_type)
 
         # Apply optional config overrides passed via env_kwargs without leaking to PipelineEnv
         overrides = kwargs.pop('config_overrides', None)
@@ -126,8 +135,8 @@ class SafePointGoal(PipelineEnv):
         # Store debug flag early for use in initialization
         self._debug = config.debug
 
-        # Load the appropriate MuJoCo model based on hazard count
-        xml_path = get_xml_path_for_hazards(num_hazards)
+        # Load the appropriate MuJoCo model based on hazard count and type
+        xml_path = get_xml_path_for_hazards(config.num_hazards, config.hazard_type)
         mj_model = mujoco.MjModel.from_xml_path(xml_path)
         mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         mj_model.opt.iterations = 4
@@ -140,7 +149,9 @@ class SafePointGoal(PipelineEnv):
         # Determine available hazards based on XML file selection
         # Since we know the XML files we created, map them to hazard counts
         xml_filename = xml_path.split('/')[-1]
-        if '8.xml' in xml_filename:
+        if '12.xml' in xml_filename:
+            available_hazards_in_xml = 12
+        elif '8.xml' in xml_filename:
             available_hazards_in_xml = 8
         elif '4.xml' in xml_filename:
             available_hazards_in_xml = 4
@@ -191,6 +202,7 @@ class SafePointGoal(PipelineEnv):
 
         # Store configuration
         self._config = config
+        self._hazard_type = config.hazard_type
         self._hazard_size = config.hazard_size
         self._goal_size = config.goal_size
         self._reward_goal = config.reward_goal
@@ -215,7 +227,8 @@ class SafePointGoal(PipelineEnv):
         self._max_layout_attempts = config.max_layout_attempts
 
         if self._debug:
-            print(f"SafePointGoal initialized with {num_hazards} hazards")
+            print(f"SafePointGoal initialized with {num_hazards} {self._hazard_type} hazards")
+            print(f"Hazard type: {self._hazard_type}")
             print(f"Hazard size: {self._hazard_size}")
             print(f"Goal size: {self._goal_size}")
             print(f"Using {self._num_hazards} hazards from XML file")
@@ -517,7 +530,11 @@ class SafePointGoal(PipelineEnv):
         return self._sample_position_in_extents(rng_key, keepout)  # Return anyway
 
     def _calculate_safety_cost(self, agent_pos: jp.ndarray, hazard_positions: jp.ndarray) -> jp.ndarray:
-        """Calculate safety cost based on hazard collisions."""
+        """Calculate safety cost based on hazard collisions.
+
+        For cylinder hazards: Distance-based cost where closer to center = higher cost.
+        For cube hazards: Binary cost (1.0 if inside, 0.0 otherwise).
+        """
         if hazard_positions.shape[0] == 0:
             return jp.array(0.0)
 
@@ -527,9 +544,17 @@ class SafePointGoal(PipelineEnv):
 
         distances = jp.sqrt(jp.sum(jp.square(agent_pos_xy - hazard_positions_xy), axis=1) + 1e-8)
 
-        # Cost is 1.0 if inside any hazard, 0.0 otherwise
-        inside_any_hazard = jp.any(distances <= self._hazard_size)
-        return jp.where(inside_any_hazard, 1.0, 0.0)
+        if self._hazard_type == "cylinders":
+            # Distance-based cost for cylinders: higher cost closer to center
+            # Cost is 1.0 at center, decreases linearly to 0.0 at hazard boundary
+            normalized_distances = distances / self._hazard_size  # 0.0 at center, 1.0 at boundary
+            individual_costs = jp.maximum(0.0, 1.0 - normalized_distances)  # 1.0 at center, 0.0 at boundary
+            # Return the maximum cost from any hazard
+            return jp.max(individual_costs)
+        else:
+            # Binary cost for cube hazards (original behavior)
+            inside_any_hazard = jp.any(distances <= self._hazard_size)
+            return jp.where(inside_any_hazard, 1.0, 0.0)
 
     def _get_obs(self, data: mjx.Data) -> jp.ndarray:
         """Creates an observation with separate lidars for goals and hazards.
@@ -805,3 +830,19 @@ def SafePointGoal_8Hazards():
 def SafePointGoal_12Hazards():
     """SafePointGoal with 12 hazards."""
     return SafePointGoal(num_hazards=12)
+
+
+# Cylinder hazard variants (flat, semi-transparent, non-colliding)
+def SafePointGoal_3CylinderHazards():
+    """SafePointGoal with 3 cylinder hazards."""
+    return SafePointGoal(num_hazards=3, hazard_type="cylinders")
+
+
+def SafePointGoal_4CylinderHazards():
+    """SafePointGoal with 4 cylinder hazards."""
+    return SafePointGoal(num_hazards=4, hazard_type="cylinders")
+
+
+def SafePointGoal_8CylinderHazards():
+    """SafePointGoal with 8 cylinder hazards."""
+    return SafePointGoal(num_hazards=8, hazard_type="cylinders")
