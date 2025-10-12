@@ -27,7 +27,7 @@ def test_record_video_circular_cylinders():
         yaw_idx=1,  # actuator 1 = velocity actuator on hinge 'z'
         steps=steps,  # total steps in episode
         num_yaw_values=5,  # number of different yaw values to sample
-        rng_seed=42,
+        rng_seed=8,
     )
     print("✓ Policy created")
 

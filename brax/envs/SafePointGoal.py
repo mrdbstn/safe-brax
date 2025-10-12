@@ -57,11 +57,14 @@ def default_config(num_hazards: int = 8, hazard_type: str = "cubes") -> config_d
 
         # Goal settings
         goal_size=0.7,                     # Goal radius
-        reward_goal=10.0,                  # Sparse reward for reaching goal
-        reward_distance=3.0,               # Dense reward scale
+        reward_goal=5.0,                  # Sparse reward for reaching goal
+        reward_distance=1.0,               # Dense reward scale
 
         # Control settings
         ctrl_cost_weight=0.001,            # Control effort penalty
+
+        # Cost settings
+        cost_scaler=0.1,            # Safety cost scaler
 
         # Lidar settings (simplified)
         lidar_num_bins=16,                  # Number of bins for each lidar (goal and hazard)
@@ -208,6 +211,7 @@ class SafePointGoal(PipelineEnv):
         self._reward_goal = config.reward_goal
         self._reward_distance = config.reward_distance
         self._ctrl_cost_weight = config.ctrl_cost_weight
+        self._cost_scaler = config.cost_scaler
         self._terminate_when_unhealthy = config.terminate_when_unhealthy
         self._healthy_z_range = config.healthy_z_range
         self._reset_noise_scale = config.reset_noise_scale
@@ -400,14 +404,15 @@ class SafePointGoal(PipelineEnv):
         goal_achieved = dist_goal <= self._goal_size
         goal_reward = jp.where(goal_achieved, self._reward_goal, 0.0)
 
-        # Control cost
+        # TODO control cost should be a separate cost component, not serve as a reward penalty
         ctrl_cost = jp.sum(jp.square(action)) * self._ctrl_cost_weight
 
-        # Safety cost (hazard collision)
+        # Safety cost (distance-based penalty near hazards)
         cost = self._calculate_safety_cost(agent_pos, hazard_positions)
 
         # Total reward
-        reward = dist_reward + goal_reward - ctrl_cost
+        # reward = dist_reward + goal_reward - ctrl_cost
+        reward = dist_reward + goal_reward
 
         # Health check
         min_z, max_z = self._healthy_z_range
@@ -547,10 +552,9 @@ class SafePointGoal(PipelineEnv):
         if self._hazard_type == "cylinders":
             # Distance-based cost for cylinders: higher cost closer to center
             # Cost is 1.0 at center, decreases linearly to 0.0 at hazard boundary
-            normalized_distances = distances / self._hazard_size  # 0.0 at center, 1.0 at boundary
-            individual_costs = jp.maximum(0.0, 1.0 - normalized_distances)  # 1.0 at center, 0.0 at boundary
-            # Return the maximum cost from any hazard
-            return jp.max(individual_costs)
+            normalized_distances = distances / self._hazard_size
+            individual_costs = jp.maximum(0.0, 1.0 - normalized_distances)
+            return jp.sum(individual_costs) * self._cost_scaler
         else:
             # Binary cost for cube hazards (original behavior)
             inside_any_hazard = jp.any(distances <= self._hazard_size)

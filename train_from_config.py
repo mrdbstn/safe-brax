@@ -112,7 +112,7 @@ def get_default_env_config() -> config_dict.ConfigDict:
     """Returns the default config for PointHazardGoal environment."""
     config = config_dict.create(
         # New safety-gymnasium reward parameters
-        reward_distance=3,
+        reward_distance=1.0,
         reward_goal=10.0,
         goal_size=0.7,
         reward_orientation=False,

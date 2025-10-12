@@ -3,7 +3,7 @@ import jax.numpy as jp
 import numpy as np
 
 
-# --- Dummy circular policy maker ---
+# --- Circular policy maker ---
 def make_circular_policy(action_dim: int, thrust: float, yaw_rate: float, thrust_idx: int, yaw_idx: int):
     """
     Returns a make_inference_fn(params)->inference(obs, rng)->(action, info)
@@ -46,7 +46,7 @@ def make_multi_directional_policy(action_dim: int, thrust: float, thrust_idx: in
     # Sample yaw values from [-1, 1] range
     key = jax.random.PRNGKey(rng_seed)
     k_mag, k_sign = jax.random.split(key)
-    mags  = jax.random.uniform(k_mag, (num_yaw_values,), minval=0.3, maxval=1.0)
+    mags  = jax.random.uniform(k_mag, (num_yaw_values,), minval=0.3, maxval=0.7)
     signs = jax.random.choice(k_sign, jp.array([-1.0, 1.0], dtype=jp.float32), shape=(num_yaw_values,))
     yaw_values = (mags * signs).astype(jp.float32)
 
