@@ -231,6 +231,7 @@ def train(
         num_eval_envs: int = 128,
         deterministic_eval: bool = False,
         # training metrics
+        buffer_size: int = 1000,
         log_training_metrics: bool = False,
         training_metrics_steps: Optional[int] = None,
         # callbacks
@@ -421,6 +422,7 @@ def train(
     )
 
     metrics_aggregator = metric_logger.MetricsLogger(
+        buffer_size=buffer_size,
         steps_between_logging=training_metrics_steps
                               or env_step_per_training_step,
         progress_fn=progress_fn,

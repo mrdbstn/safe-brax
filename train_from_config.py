@@ -49,35 +49,25 @@ except ImportError:
         train_ppo_cost = None
         RewardMinusCostWrapper = None  # type: ignore
 
+# Import PPO-Lagrange V3 (explicit - no fallbacks)
 try:
     from brax.training.agents.ppo_lagrange_v3 import train as ppo_lagrange_v3_train
 except ImportError:
     try:
         from brax.training.agents import ppo_lagrange_v3
-
         ppo_lagrange_v3_train = ppo_lagrange_v3.train
-    except ImportError:
+    except (ImportError, AttributeError):
         ppo_lagrange_v3_train = None
 
+# Import PPO-Lagrange V2 (explicit - separate from v3)
 try:
     from brax.training.agents.ppo_lagrange_v2 import train as ppo_lagrange_v2_train
 except ImportError:
     try:
         from brax.training.agents import ppo_lagrange_v2
-
         ppo_lagrange_v2_train = ppo_lagrange_v2.train
-    except ImportError:
+    except (ImportError, AttributeError):
         ppo_lagrange_v2_train = None
-
-try:
-    from brax.training.agents.ppo_lagrange import train as ppo_lagrange_train
-except ImportError:
-    try:
-        from brax.training.agents import ppo_lagrange
-
-        ppo_lagrange_train = ppo_lagrange.train
-    except ImportError:
-        ppo_lagrange_train = None
 from brax.io import model as brax_model
 from brax.io import json as brax_json
 import wandb
@@ -207,32 +197,46 @@ def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) 
 
 
 def get_algorithm_train_fn(alg_name: str):
-    """Get the appropriate training function based on algorithm name."""
-    # Try to find the best available PPO-Lagrange version
-    if ppo_lagrange_v3_train is not None:
-        default_ppol = ppo_lagrange_v3_train
-    elif ppo_lagrange_v2_train is not None:
-        default_ppol = ppo_lagrange_v2_train
-    elif ppo_lagrange_train is not None:
-        default_ppol = ppo_lagrange_train
-    else:
-        default_ppol = None
-
+    """Get the appropriate training function based on algorithm name.
+    
+    Note: Both PPO-Lagrange V2 and V3 are supported.
+    - Use explicit version names ('ppo_lagrange_v2', 'ppo_lagrange_v3') to be clear
+    - Generic names ('ppo_lagrange', 'ppol') default to V3 for best performance
+    
+    Returns:
+        The training function for the specified algorithm
+    """
+    # Algorithm map with EXPLICIT versions
     alg_map = {
         'ppo': ppo_train,
         'ppo_cost': train_ppo_cost,
         'ppoc': train_ppo_cost,  # Alias
-        'ppo_lagrange': default_ppol,
-        'ppo_lagrange_v2': ppo_lagrange_v2_train or default_ppol,
-        'ppo_lagrange_v3': ppo_lagrange_v3_train or default_ppol,
-        'ppol': default_ppol,  # Alias
-        'ppol_v3': ppo_lagrange_v3_train or default_ppol,  # Alias
+        
+        # PPO-Lagrange - generic names default to V3 (recommended)
+        'ppo_lagrange': ppo_lagrange_v3_train,
+        'ppol': ppo_lagrange_v3_train,
+        
+        # PPO-Lagrange - EXPLICIT versions (recommended for reproducibility)
+        'ppo_lagrange_v2': ppo_lagrange_v2_train,
+        'ppol_v2': ppo_lagrange_v2_train,
+        'ppo_lagrange_v3': ppo_lagrange_v3_train,
+        'ppol_v3': ppo_lagrange_v3_train,
     }
 
     train_fn = alg_map.get(alg_name)
     if train_fn is None:
         available = [k for k, v in alg_map.items() if v is not None]
         raise ValueError(f"Algorithm '{alg_name}' not available or not installed. Available: {available}")
+    
+    # Log which version is being used for Lagrange algorithms
+    if 'lagrange' in alg_name.lower() or 'ppol' in alg_name.lower():
+        if train_fn == ppo_lagrange_v3_train:
+            version = "V3"
+        elif train_fn == ppo_lagrange_v2_train:
+            version = "V2"
+        else:
+            version = "UNKNOWN"
+        print(f"Using PPO-Lagrange {version} for algorithm '{alg_name}'")
 
     return train_fn
 
@@ -880,9 +884,23 @@ def main():
     # Load config
     config = load_config(args.config)
 
-    # Override config with command line args if provided
+    # Override config with command line args ONLY if explicitly provided
+    # Detect which args were explicitly provided on command line
+    import sys
+    provided_args = set()
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith('--'):
+            arg_name = arg[2:].replace('-', '_')  # Convert --foo-bar to foo_bar
+            provided_args.add(arg_name)
+    
     for key, value in vars(args).items():
-        config[key] = value
+        # Override if:
+        # 1. Key doesn't exist in config (new parameter), OR
+        # 2. Argument was explicitly provided on command line
+        if key not in config or key in provided_args:
+            # Special case: don't override with 'config' argument itself
+            if key != 'config':
+                config[key] = value
 
     # Run training for each seed
     for seed in args.seeds:

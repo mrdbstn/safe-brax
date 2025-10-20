@@ -1,8 +1,8 @@
 {
   "env": "point_resetting_goal_random_hazard_lidar_sensor_obs",
-  "alg": "ppo_lagrange",
+  "alg": "ppo_lagrange_v2",
   "out_dir": "runs/experimental_results",
-  "num_timesteps": 30000000,
+  "num_timesteps": 100000000,
   "episode_length": 2000,
   "num_envs": 2048,
   "unroll_length": 8,
@@ -20,7 +20,7 @@
   "num_eval_envs": 128,
   "deterministic_eval": false,
   "training_metrics_steps": 100000,
-  "safety_bound": 0.2,
+  "safety_bound": 0.05,
   "lagrangian_coef_rate": 0.001,
   "initial_lambda_lagr": 0.0,
   "env_kwargs": {
