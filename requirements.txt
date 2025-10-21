@@ -41,10 +41,6 @@ scipy
 trimesh
 typing-extensions
 
-# Optional: Safety Gymnasium (if using safety-gym environments)
-# Note: Has version conflicts with mujoco 3.3.2, but can be ignored for brax environments
-safety-gymnasium==1.0.0
-
 # Optional: Gym compatibility
 gym>=0.26.0
 gymnasium>=0.28.0
