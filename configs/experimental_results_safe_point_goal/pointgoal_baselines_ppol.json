@@ -7,7 +7,7 @@
   "num_envs": 2048,
   "unroll_length": 8,
   "batch_size": 1024,
-  "num_minibatches": 32,
+  "num_minibatches": 64,
   "num_updates_per_batch": 6,
   "learning_rate": 0.0005,
   "entropy_cost": 0.005,
@@ -21,7 +21,7 @@
   "deterministic_eval": false,
   "training_metrics_steps": 100000,
   "safety_bound": 0.05,
-  "lagrangian_coef_rate": 0.001,
+  "lagrangian_coef_rate": 0.1,
   "initial_lambda_lagr": 0.0,
   "env_kwargs": {
     "config_overrides": {
