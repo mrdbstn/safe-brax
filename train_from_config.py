@@ -20,6 +20,7 @@ import mujoco
 import numpy as np
 from jax import lax
 from matplotlib import pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
 from brax import envs
 from brax.envs import Env
@@ -101,7 +102,7 @@ def get_default_env_config() -> config_dict.ConfigDict:
     """Returns the default config for PointHazardGoal environment."""
     config = config_dict.create(
         # New safety-gymnasium reward parameters
-        reward_distance=3,
+        reward_distance=1.0,
         reward_goal=10.0,
         goal_size=0.7,
         reward_orientation=False,
@@ -723,6 +724,8 @@ def record_episode_video(
         out_name: str = "rollout.mp4",
         log_to_wandb: bool = True,
         seed: int = 0,
+        show_metrics: bool = True,  # Print the cost on the screen
+        font: str = "DejaVuSans-Bold"  # Font for overlay text, if available
 ):
     """
     Renders a fresh eval rollout controlled by your trained policy.
@@ -744,15 +747,17 @@ def record_episode_video(
             key, sk = jax.random.split(key)
             action, _ = infer(state.obs, sk)
             next_state = env.step(state, action)
-            return (next_state, key), next_state.pipeline_state
+            # Return both pipeline state and full state for cost access
+            return (next_state, key), (next_state.pipeline_state, next_state)
 
-        (final_state, _), frames = lax.scan(step_fn, (state, key), xs=None, length=steps)
-        return frames, final_state
+        (final_state, _), (frames, states) = lax.scan(step_fn, (state, key), xs=None, length=steps)
+        return frames, states, final_state
 
     # 3) Run rollout to collect frames
     key = jax.random.PRNGKey(seed)
-    frames_batched, _ = rollout(key)  # PyTree with leading T
+    frames_batched, states_batched, final_state = rollout(key)  # PyTree with leading T
     frames_batched = jax.device_get(frames_batched)
+    states_batched = jax.device_get(states_batched)
 
     # Unstack to a Python list of per-step pipeline states
     leaves = jax.tree_util.tree_leaves(frames_batched)
@@ -760,12 +765,64 @@ def record_episode_video(
     def index_t(t):
         return jax.tree.map(lambda x: x[t], frames_batched)
 
-    frames = [index_t(t) for t in range(int(leaves[0].shape[0]))]
+    def index_state_t(t):
+        return jax.tree.map(lambda x: x[t], states_batched)
 
-    # 4) Render
+    frames = [index_t(t) for t in range(int(leaves[0].shape[0]))]
+    states = [index_state_t(t) for t in range(int(leaves[0].shape[0]))] if show_metrics else None
+
+    # 4) Render the episode
     rendering = env.render(frames, width=width, height=height, camera=camera)
 
-    # 5) Save mp4 (and log)
+    # 5) Add reward/cost overlay if requested
+    if show_metrics and states is not None:
+        rendering_with_metrics = []
+        try:
+            # Try to load a font, fallback to default if not available
+            font = ImageFont.truetype(f"{font}.ttf", 20)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+
+        reward = 0.0
+        cost = 0.0
+
+        for i, (frame, state) in enumerate(zip(rendering, states)):
+            # Convert frame to PIL Image
+            img = Image.fromarray(frame.astype(np.uint8))
+            draw = ImageDraw.Draw(img)
+
+            # Extract metrics from the state info
+            reward += state.reward.item()
+            cost += state.info['cost'].item()
+
+            # Add cost text overlay
+            reward_text = f"Reward: {reward:.2f}"
+            cost_text = f"Cost: {cost:.2f}"
+
+            # Color
+            text_color_reward = (50, 220, 50)  # Green text
+            text_color_cost = (230, 60, 60)  # Red text
+            outline_color = (0, 0, 0)    # Black outline
+
+            # Position text in top-left corner
+            x_rew, y_rew = 10, 10
+            x_cost, y_cost = 10, 40
+
+            # Draw text with outline for better visibility
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx != 0 or dy != 0:
+                        draw.text((x_rew + dx, y_rew + dy), reward_text, font=font, fill=outline_color)
+                        draw.text((x_cost + dx, y_cost + dy), cost_text, font=font, fill=outline_color)
+            draw.text((x_rew, y_rew), reward_text, font=font, fill=text_color_reward)
+            draw.text((x_cost, y_cost), cost_text, font=font, fill=text_color_cost)
+
+            # Convert back to numpy array
+            rendering_with_metrics.append(np.array(img))
+
+        rendering = rendering_with_metrics
+
+    # 6) Save mp4 (and log)
     os.makedirs("videos", exist_ok=True)
     mp4_path = os.path.join("videos", out_name)
     iio.imwrite(mp4_path, np.stack(rendering), fps=fps)
