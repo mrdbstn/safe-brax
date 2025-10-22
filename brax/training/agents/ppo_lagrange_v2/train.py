@@ -588,6 +588,14 @@ def train(
         env_steps=training_state.env_steps + env_step_per_training_step,
         lambda_lagr=updated_lambda_lagr,
     )
+    
+    if log_training_metrics:
+      jax.debug.callback(
+          metrics_aggregator.update_train_metrics,
+          metrics,
+          new_training_state.env_steps,
+      )
+    
     return (new_training_state, state, new_key), metrics
 
   def training_epoch(
