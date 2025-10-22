@@ -40,9 +40,11 @@ dependencies = [
     "jaxlib>=0.4.6",
     "jaxopt",
     "jinja2",
+    "matplot>=0.1.9",
     "ml_collections",
     "mujoco",
     "mujoco-mjx",
+    "notebook>=7.4.7",
     "numpy",
     "optax",
     "orbax-checkpoint",
@@ -51,6 +53,8 @@ dependencies = [
     "tensorboardX",
     "trimesh",
     "typing-extensions",
+    "wandb>=0.22.1",
+    "warp-lang>=1.9.1",
 ]
 
 [project.optional-dependencies]
