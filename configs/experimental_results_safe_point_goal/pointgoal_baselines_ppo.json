@@ -2,7 +2,7 @@
   "env": "point_resetting_goal_random_hazard_lidar_sensor_obs",
   "alg": "ppo",
   "out_dir": "runs/experimental_results",
-  "num_timesteps": 30000000,
+  "num_timesteps": 100000000,
   "episode_length": 2000,
   "num_envs": 2048,
   "unroll_length": 8,
