@@ -846,8 +846,9 @@ def main():
                         help="Camera name or id (string name or numeric string index)")
     parser.add_argument("--video_width", type=int, default=320, help="Output video width")
     parser.add_argument("--video_height", type=int, default=240, help="Output video height")
-    parser.add_argument("--video_fps", type=int, default=30, help="Output video FPS")
     parser.add_argument("--video_length", type=int, default=2500, help="Number of frames in the video")
+    parser.add_argument("--video_fps", type=int, default=50, help="Output video FPS")
+    parser.add_argument("--video_frame_stride", type=int, default=10, help="Output video frame stride")
 
     config = parser.parse_args()
 
@@ -893,6 +894,7 @@ def main():
                 width=config.video_width,
                 height=config.video_height,
                 fps=config.video_fps,
+                frame_stride=config.video_frame_stride,
                 out_name=f"{config.env_name}_{config.alg}_seed{seed}.mp4",
                 log_to_wandb=config.use_wandb,
                 seed=seed,
