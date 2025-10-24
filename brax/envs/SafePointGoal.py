@@ -686,44 +686,73 @@ class SafePointGoal(PipelineEnv):
         hazard_lidar_obs = jp.zeros(_lidar_num_bins)
 
         # === GOAL LIDAR ===
-        # Use the agent-centric dx and dy for goal Lidar angle calculation
-        dx_goal = agent_centric_dx_goal
-        dy_goal = agent_centric_dy_goal
-
-        dist_goal = safe_norm(jp.array([dx_goal, dy_goal]))
-
-        angle_goal = jp.arctan2(dy_goal, dx_goal)  # Angle from positive x-axis, range [-pi, pi]
-        angle_goal = (angle_goal + 2 * jp.pi) % (2 * jp.pi)  # Convert to [0, 2*pi]
-
+        # Use the first goal for the compass to avoid changing obs semantics. For lidar, accumulate all goals.
         bin_size = (2 * jp.pi) / _lidar_num_bins
 
-        # Determine which bin the goal falls into
-        bin_idx_float_goal = angle_goal / bin_size
-        bin_idx_goal = jp.floor(bin_idx_float_goal)
-        bin_idx_goal = jp.minimum(bin_idx_goal, _lidar_num_bins - 1).astype(int)
+        def process_goal_lidar(carry, goal_mocap_id):
+            """Accumulate lidar signal from a single goal."""
+            goal_lidar, agent_pos, cos_a, sin_a = carry
 
-        # Calculate sensor reading for goal (linear decay "closeness")
-        sensor_val_goal = jp.maximum(0.0, _lidar_max_dist - dist_goal) / _lidar_max_dist
-        sensor_val_goal = jp.where(dist_goal > _lidar_max_dist, 0.0, sensor_val_goal)
-
-        # Update the goal Lidar observation for the primary bin
-        goal_lidar_obs = goal_lidar_obs.at[bin_idx_goal].set(jp.maximum(goal_lidar_obs[bin_idx_goal], sensor_val_goal))
-
-        if _lidar_alias:
-            # Calculate alias interpolation factor for goal
-            alias_factor_goal = bin_idx_float_goal - bin_idx_goal
-
-            # Bin plus one (wraps around)
-            bin_plus_idx_goal = (bin_idx_goal + 1) % _lidar_num_bins
-            goal_lidar_obs = goal_lidar_obs.at[bin_plus_idx_goal].set(
-                jp.maximum(goal_lidar_obs[bin_plus_idx_goal], alias_factor_goal * sensor_val_goal)
+            # Get goal position or a dummy if invalid
+            goal_pos_3d = jp.where(
+                goal_mocap_id >= 0,
+                data.mocap_pos[goal_mocap_id],
+                jp.array([0.0, 0.0, 0.0])
             )
 
-            # Bin minus one (wraps around)
-            bin_minus_idx_goal = (bin_idx_goal - 1 + _lidar_num_bins) % _lidar_num_bins
-            goal_lidar_obs = goal_lidar_obs.at[bin_minus_idx_goal].set(
-                jp.maximum(goal_lidar_obs[bin_minus_idx_goal], (1.0 - alias_factor_goal) * sensor_val_goal)
+            # Relative vector in world frame
+            rel_goal_pos_3d_world = goal_pos_3d - agent_pos
+            world_dx_goal = rel_goal_pos_3d_world[0]
+            world_dy_goal = rel_goal_pos_3d_world[1]
+
+            # Agent-centric transform
+            agent_centric_dx_goal = world_dx_goal * cos_a + world_dy_goal * sin_a
+            agent_centric_dy_goal = -world_dx_goal * sin_a + world_dy_goal * cos_a
+
+            # Distance and angle
+            dist_goal = safe_norm(jp.array([agent_centric_dx_goal, agent_centric_dy_goal]))
+            angle_goal = jp.arctan2(agent_centric_dy_goal, agent_centric_dx_goal)
+            angle_goal = (angle_goal + 2 * jp.pi) % (2 * jp.pi)
+
+            # Bin index
+            bin_idx_float_goal = angle_goal / bin_size
+            bin_idx_goal = jp.floor(bin_idx_float_goal)
+            bin_idx_goal = jp.minimum(bin_idx_goal, _lidar_num_bins - 1).astype(int)
+
+            # Sensor value with range limit
+            sensor_val_goal = jp.maximum(0.0, _lidar_max_dist - dist_goal) / _lidar_max_dist
+            sensor_val_goal = jp.where(dist_goal > _lidar_max_dist, 0.0, sensor_val_goal)
+
+            # Zero out if mocap id is invalid
+            sensor_val_goal = jp.where(goal_mocap_id >= 0, sensor_val_goal, 0.0)
+
+            # Primary bin: take max across goals
+            goal_lidar = goal_lidar.at[bin_idx_goal].set(
+                jp.maximum(goal_lidar[bin_idx_goal], sensor_val_goal)
             )
+
+            if _lidar_alias:
+                # Alias to neighbors
+                alias_factor_goal = bin_idx_float_goal - bin_idx_goal
+
+                bin_plus_idx_goal = (bin_idx_goal + 1) % _lidar_num_bins
+                goal_lidar = goal_lidar.at[bin_plus_idx_goal].set(
+                    jp.maximum(goal_lidar[bin_plus_idx_goal], alias_factor_goal * sensor_val_goal)
+                )
+
+                bin_minus_idx_goal = (bin_idx_goal - 1 + _lidar_num_bins) % _lidar_num_bins
+                goal_lidar = goal_lidar.at[bin_minus_idx_goal].set(
+                    jp.maximum(goal_lidar[bin_minus_idx_goal], (1.0 - alias_factor_goal) * sensor_val_goal)
+                )
+
+            return (goal_lidar, agent_pos, cos_a, sin_a), None
+
+        # Scan over all goals and aggregate their contributions
+        goal_mocap_ids_array = jp.array(self._goal_mocap_ids)
+        init_goal_carry = (goal_lidar_obs, agent_pos, cos_a, sin_a)
+        (goal_lidar_obs, _, _, _), _ = jax.lax.scan(
+            process_goal_lidar, init_goal_carry, goal_mocap_ids_array
+        )
 
         # === HAZARD LIDAR ===
         # Process hazards for the hazard lidar
