@@ -758,7 +758,6 @@ def train(
     training_metrics = {}
     training_walltime = 0
     current_step = 0
-    last_log_step = 0
 
     for it in range(num_evals_after_init):
         logging.info('starting iteration %s %s', it, time.time() - xt)
