@@ -1,7 +1,8 @@
 import os
-from pathlib import Path
 
-from brax.envs.SafePointGoal import SafePointGoal, default_config, generate_xml_with_goals_and_hazards, create_hazard_manager_from_config, create_goal_manager_from_config
+from brax.envs.SafePointGoal import default_config
+from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
+    generate_point_goal_xml
 
 
 def test_print_xml_mixed_hazards():
@@ -27,7 +28,7 @@ def test_print_xml_mixed_hazards():
     hazard_manager = create_hazard_manager_from_config(cfg.hazards)
 
     # Generate XML
-    xml_path = generate_xml_with_goals_and_hazards(goal_manager, hazard_manager)
+    xml_path = generate_point_goal_xml(goal_manager, hazard_manager)
 
     try:
         # Read and print the XML content
@@ -43,9 +44,11 @@ def test_print_xml_mixed_hazards():
         # Print summary
         cube_hazards = hazard_manager.get_hazards_by_type("cube")
         cylinder_hazards = hazard_manager.get_hazards_by_type("cylinder")
+        goal_count = goal_manager.get_goal_count()
+        hazard_count = hazard_manager.get_hazard_count()
         print(f"\n✓ XML generated with:")
-        print(f"  - {goal_manager.get_goal_count()} goal(s)")
-        print(f"  - {hazard_manager.get_hazard_count()} total hazards ({len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders)")
+        print(f"  - {goal_count} goal(s)")
+        print(f"  - {hazard_count} total hazards ({len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders)")
 
     finally:
         # Clean up temporary XML file

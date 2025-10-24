@@ -767,7 +767,6 @@ def main():
     parser = argparse.ArgumentParser(description='Train Safe-Brax agents from config files')
 
     # --- Core ---
-    parser.add_argument("--config", type=str, required=True, help="Path to config JSON file")
     parser.add_argument("--seeds", type=int, nargs="+", default=[0], help="Random seeds")
 
     # --- Experiment Control ---
@@ -779,7 +778,7 @@ def main():
     parser.add_argument("--model_dir", type=str, default="models", help="Directory to save model parameters")
 
     # --- Environment ---
-    parser.add_argument("--env_name", type=str, default="safe_point_goal", help="Env name (preferred)")
+    parser.add_argument("--env_name", type=str, default="safe_point_goal", help="Env name")
     parser.add_argument("--env_kwargs", type=_json_type, default={
         "config_overrides": {
             "ctrl_cost_weight": 0.001,
@@ -846,8 +845,8 @@ def main():
                         help="Camera name or id (string name or numeric string index)")
     parser.add_argument("--video_width", type=int, default=320, help="Output video width")
     parser.add_argument("--video_height", type=int, default=240, help="Output video height")
-    parser.add_argument("--video_length", type=int, default=2500, help="Number of frames in the video")
-    parser.add_argument("--video_fps", type=int, default=50, help="Output video FPS")
+    parser.add_argument("--video_length", type=int, default=5000, help="Number of frames in the video")
+    parser.add_argument("--video_fps", type=int, default=500, help="Output video FPS")
     parser.add_argument("--video_frame_stride", type=int, default=10, help="Output video frame stride")
 
     config = parser.parse_args()

@@ -6,7 +6,6 @@ Features goal resetting, safety costs, and simplified lidar observations.
 """
 
 import os
-import tempfile
 from typing import Dict
 
 import jax
@@ -16,81 +15,11 @@ from ml_collections import config_dict
 from mujoco import mjx
 
 from brax.envs.base import PipelineEnv, State
-from brax.envs.builder import XMLBuilder
-from brax.envs.goals import GoalManager
-from brax.envs.hazards import HazardManager, _type_defaults_from_registry
+from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
+    generate_point_goal_xml, safe_norm, shallow_merge, expand_hazard_specs, choose_valid_position, \
+    sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents
+from brax.envs.hazards import _type_defaults_from_registry
 from brax.io import mjcf
-
-# Construct absolute path to point_hazard_goal.xml
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-
-
-def create_hazard_manager_from_config(hazards_cfg) -> HazardManager:
-    """Create a HazardManager from new nested config.
-
-    hazards_cfg: ConfigDict with field:
-      - specs: list of dicts {type, count, size, height, collidable}
-    """
-    manager = HazardManager()
-    specs = list(hazards_cfg.specs) if hazards_cfg and hasattr(hazards_cfg, 'specs') else []
-    for spec in specs:
-        manager.add_hazards(
-            hazard_type=spec.get('type', 'cube'),
-            count=spec.get('count', 0),
-            size=spec.get('size', None),
-            height=spec.get('height', None),
-            collidable=spec.get('collidable', True),
-            movable=spec.get('movable', False),
-            density=spec.get('density', None),
-        )
-    return manager
-
-
-def create_goal_manager_from_config(goals_cfg) -> GoalManager:
-    """Create a GoalManager from new nested config.
-
-    goals_cfg: ConfigDict with fields:
-      - type ('cube'|'cylinder'), count, size, height,
-        positions (optional list), collidable (bool)
-    """
-    manager = GoalManager()
-    g = goals_cfg
-    manager.add_goals(
-        goal_type=g.type,
-        count=g.count,
-        positions=g.positions,
-        size=g.size,
-        height=g.height,
-    )
-    return manager
-
-
-def generate_xml_with_goals_and_hazards(goal_manager: GoalManager, hazard_manager: HazardManager) -> str:
-    """Generate XML file content with the specified goals and hazards.
-
-    Args:
-        goal_manager: GoalManager containing the goals
-        hazard_manager: HazardManager containing the hazards
-
-    Returns:
-        Path to the generated temporary XML file
-    """
-    base_xml_path = os.path.join(_current_dir, 'assets', 'point.xml')
-
-    # Use XMLBuilder to generate complete XML
-    builder = XMLBuilder("point_goal_hazard")
-    xml_content = builder.build_xml(base_xml_path, goal_manager, hazard_manager)
-
-    # Create temporary file
-    temp_fd, temp_path = tempfile.mkstemp(suffix='.xml', prefix='safe_point_goal_')
-    try:
-        with os.fdopen(temp_fd, 'w') as f:
-            f.write(xml_content)
-    except:
-        os.close(temp_fd)
-        raise
-
-    return temp_path
 
 
 def default_config() -> config_dict.ConfigDict:
@@ -128,11 +57,9 @@ def default_config() -> config_dict.ConfigDict:
 
         # --- Placement constraints (Safety Gymnasium style) ---
         placement=config_dict.create(
-            extents=(-2.0, -2.0, 2.0, 2.0),  # [min_x, min_y, max_x, max_y]
-            agent_keepout=0.4,  # Keepout radius around agent
-            goal_keepout=0.4,  # Keepout radius for goal placement
-            hazard_keepout=0.4,  # Keepout radius for hazard placement
-            margin=0.1,  # Additional spacing margin for placement
+            extents=(-2.5, -2.5, 2.5, 2.5),  # [min_x, min_y, max_x, max_y]
+            agent_keepout=0.1,  # Keepout radius around agent
+            margin=0.05,  # Additional spacing margin for placement
             attempts_pos=100,  # Max attempts to place a single object
             attempts_layout=1000,  # Max attempts to build a full valid layout
         ),
@@ -157,8 +84,8 @@ def default_config() -> config_dict.ConfigDict:
                     size=0.2,  # Cube: half-size (uniform) or radius proxy; Cylinder: radius
                     height=0.2,  # Cylinder/cube height. If None, use hazard own defaults.
                     collidable=True,  # Whether hazards participate in contact
-                    movable=False,  # Dynamic hazards?
-                    density=1.0,  # kg/m^3
+                    movable=False,  # Dynamic hazards? (WIP)
+                    density=1.0,  # kg/m^3 (WIP)
                 ),
             ],
         ),
@@ -166,166 +93,6 @@ def default_config() -> config_dict.ConfigDict:
         # --- Debugging ---
         debug=False,  # Print extra diagnostics during setup/reset
     )
-
-
-def safe_norm(x, axis=None, keepdims=False, eps=1e-8):
-    """Safely compute the norm with a small epsilon to avoid NaN."""
-    return jp.sqrt(jp.sum(jp.square(x), axis=axis, keepdims=keepdims) + eps)
-
-
-def shallow_merge(base: config_dict.ConfigDict, over: config_dict.ConfigDict | None):
-    if over is None:
-        return base
-    for k, v in over.items():
-        base[k] = v
-    return base
-
-
-def expand_hazard_specs(cfg: config_dict.ConfigDict):
-    if not hasattr(cfg, "hazards"):
-        return cfg
-    td = dict(getattr(cfg.hazards, "type_defaults", {}))
-    specs = list(getattr(cfg.hazards, "specs", []))
-    resolved = []
-    for s in specs:
-        if not isinstance(s, dict):
-            resolved.append(s)
-            continue
-        t = s.get("type")
-        base = dict(td.get(t, {}))
-        base.update(s)  # override only what the spec sets
-        resolved.append(base)
-    cfg.hazards.specs = resolved
-    return cfg
-
-
-# Helper to sample many candidates within extents
-def _sample_candidate_positions(rkey: jp.ndarray, num_candidates: int, keepout: float, placement_extents) -> jp.ndarray:
-    min_x, min_y, max_x, max_y = placement_extents
-    min_x = min_x + keepout
-    min_y = min_y + keepout
-    max_x = max_x - keepout
-    max_y = max_y - keepout
-    rkey, sk1, sk2 = jax.random.split(rkey, 3)
-    xs = jax.random.uniform(sk1, (num_candidates,), minval=min_x, maxval=max_x)
-    ys = jax.random.uniform(sk2, (num_candidates,), minval=min_y, maxval=max_y)
-    zs = jp.full((num_candidates,), 0.09)
-    return jp.stack([xs, ys, zs], axis=1)
-
-
-# Choose a valid position against existing positions
-def _choose_valid_position(rkey: jp.ndarray,
-                           existing_xy_all: jp.ndarray,
-                           existing_keepouts_all: jp.ndarray,
-                           active_count: jp.ndarray,
-                           keepout: float,
-                           num_candidates: int,
-                           placement_extents,
-                           placement_margin) -> tuple[jp.ndarray, jp.ndarray]:
-    candidates = _sample_candidate_positions(rkey, num_candidates, keepout, placement_extents)
-    cand_xy = candidates[:, :2]  # (K,2)
-
-    # active slice
-    M = existing_xy_all.shape[0]
-    idxs = jp.arange(M)[None, :]
-    active_mask = (idxs < active_count)  # (1,M) broadcast to (K,M)
-
-    # distances to all potential existing slots (K, M)
-    diffs = cand_xy[:, None, :] - existing_xy_all[None, :, :]
-    dists = jp.sqrt(jp.sum(jp.square(diffs), axis=-1) + 1e-8)
-    req = existing_keepouts_all[None, :] + keepout + placement_margin
-
-    # slack: positive means OK; ignore inactive by setting huge slack
-    slack = dists - req
-    slack = jp.where(active_mask, slack, jp.full_like(slack, 1e9))
-
-    # best candidate is the one that maximizes its worst slack (furthest from trouble)
-    min_slack = jp.min(slack, axis=1)  # (K,)
-    best_idx = jp.argmax(min_slack)
-    best = candidates[best_idx]
-    best_xy = best[:2]
-
-    # valid if worst slack >= 0
-    is_valid = (min_slack[best_idx] >= 0.0)
-
-    def _accept(x):  # already valid
-        return x
-
-    def _nudge(x):
-        # push away from nearest active neighbor just enough to meet req
-        # find nearest active neighbor for this best candidate
-        d = dists[best_idx]  # (M,)
-        d = jp.where(active_mask[0], d, jp.full_like(d, 1e9))
-        j = jp.argmin(d)
-        need = req[0, j]
-        have = d[j]
-        # direction to push (normalized)
-        v = best_xy - existing_xy_all[j]
-        vn = v / (jp.sqrt(jp.sum(jp.square(v))) + 1e-8)
-        # move delta so distance == need + tiny epsilon
-        delta = (need - have + 1e-3) * vn
-        nudged_xy = best_xy + delta
-
-        # clip to extents minus keepout
-        min_x, min_y, max_x, max_y = placement_extents
-        nudged_xy = jp.array([
-            jp.clip(nudged_xy[0], min_x + keepout, max_x - keepout),
-            jp.clip(nudged_xy[1], min_y + keepout, max_y - keepout),
-        ])
-        return jp.array([nudged_xy[0], nudged_xy[1], x[2]])
-
-    chosen = jax.lax.cond(is_valid, _accept, _nudge, best)
-
-    # advance rng once per call so scan stays deterministic
-    rkey, _ = jax.random.split(rkey)
-    return chosen, rkey
-
-
-import jax.numpy as jp
-
-
-# ---- Per-goal signed distance helpers (2D) ----
-def sdf_cylinder(agent_xy, center_xy, radius):
-    """
-    Signed distance from a 2D point to a circle.
-      < 0 : inside the circle
-      = 0 : on the boundary
-      > 0 : outside the circle
-    """
-    offset = agent_xy - center_xy
-    distance_to_center = jp.linalg.norm(offset, ord=2)
-    return distance_to_center - radius
-
-
-def sdf_cube(agent_xy, center_xy, half_sizes_xy, yaw=0.0):
-    """
-    Signed distance from a 2D point to a yaw-rotated axis-aligned box (rectangle).
-
-    half_sizes_xy = (half_width, half_height)
-    yaw = rotation of the box in radians, positive CCW.
-
-      < 0 : inside the box
-      = 0 : on the boundary
-      > 0 : outside the box
-    """
-    # Rotate the point into the box's local frame
-    cos_yaw, sin_yaw = jp.cos(yaw), jp.sin(yaw)
-    rotation = jp.array([[cos_yaw, -sin_yaw],
-                         [sin_yaw, cos_yaw]])
-    local_xy = (agent_xy - center_xy) @ rotation
-
-    # Distance to the rectangle in local coordinates
-    # q is how far we are from the inner rectangle [-half_sizes, +half_sizes]
-    q = jp.abs(local_xy) - half_sizes_xy
-
-    # Outside part: Euclidean norm of the positive components (how far outside)
-    outside_dist = jp.linalg.norm(jp.maximum(q, 0.0), ord=2)
-
-    # Inside part: if inside, max(q) is negative; clamp to <= 0 to keep sign
-    inside_dist = jp.minimum(jp.maximum(q[0], q[1]), 0.0)
-
-    # Combine: positive outside distance or negative depth inside
-    return outside_dist + inside_dist
 
 
 class SafePointGoal(PipelineEnv):
@@ -342,7 +109,7 @@ class SafePointGoal(PipelineEnv):
     - Agent-centric observations for better learning
     - Individual compass observations for goal and each hazard
 
-    Observation space (62 dimensions):
+    Default observation space (62 dimensions):
     - Sensor data: 12 values (3 each for accel, velocity, gyro, magnetometer)
     - Goal lidar: 16 bins
     - Hazard lidar: 16 bins  
@@ -364,15 +131,27 @@ class SafePointGoal(PipelineEnv):
         self._hazard_manager = create_hazard_manager_from_config(config.hazards)
         self._goal_manager = create_goal_manager_from_config(config.goals)
 
+        # Obtain lists of goals and hazards
+        goals = self._goal_manager.goals
+        hazards = self._hazard_manager.hazards
+
+        # Per-object keepouts (no margin; margin is handled in placement math)
+        self._goal_keepouts = jp.array(
+            [g.get_keepout_radius() for g in goals], dtype=jp.float32
+        )
+        self._hazard_keepouts = jp.array(
+            [h.get_keepout_radius() for h in hazards], dtype=jp.float32
+        )
+
         # For goal reachability checks
-        packed = [g.encode_static_params() for g in self._goal_manager.goals]
+        packed = [g.encode_static_params() for g in goals]
         self._goal_type_ids = jp.array([p.type_id for p in packed], dtype=jp.int32)
         self._goal_radii = jp.array([p.radius for p in packed], dtype=jp.float32)
         self._goal_box_he = jp.array([p.half_extents_xy for p in packed], dtype=jp.float32)
         self._goal_yaws = jp.array([p.yaw for p in packed], dtype=jp.float32)
 
         # Generate XML dynamically with the configured goals and hazards
-        xml_path = generate_xml_with_goals_and_hazards(self._goal_manager, self._hazard_manager)
+        xml_path = generate_point_goal_xml(self._goal_manager, self._hazard_manager)
 
         try:
             mj_model = mujoco.MjModel.from_xml_path(xml_path)
@@ -404,14 +183,14 @@ class SafePointGoal(PipelineEnv):
 
         # goals (the names must match what XMLBuilder emits)
         self._goal_mocap_ids = []
-        for g in self._goal_manager.goals:
+        for goal in goals:
             self._goal_mocap_ids.append(
-                _mocap_id_for_body(f"goal{g.goal_id}"))
+                _mocap_id_for_body(f"goal{goal.goal_id}"))
 
         # hazards (the names must match what XMLBuilder emits)
         self._hazard_mocap_ids = []
-        for h in self._hazard_manager.hazards:
-            self._hazard_mocap_ids.append(_mocap_id_for_body(f"hazard{h.hazard_id}"))
+        for hazard in hazards:
+            self._hazard_mocap_ids.append(_mocap_id_for_body(f"hazard{hazard.hazard_id}"))
 
         # Cache agent and hazard geom ids for contact checks
         self._agent_geom_ids = jp.array(
@@ -420,9 +199,9 @@ class SafePointGoal(PipelineEnv):
         )
 
         # Assign geom_id to each hazard by name "hazard{i}"
-        for h in self._hazard_manager.hazards:
-            gid = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_GEOM, f"hazard{h.hazard_id}")
-            h.geom_id = gid
+        for hazard in hazards:
+            gid = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_GEOM, f"hazard{hazard.hazard_id}")
+            hazard.geom_id = gid
 
         # Get hazard information from HazardManager
         self._num_hazards = self._hazard_manager.get_hazard_count()
@@ -477,15 +256,13 @@ class SafePointGoal(PipelineEnv):
         # Placement
         self._placement_extents = config.placement.extents
         self._agent_keepout = config.placement.agent_keepout
-        self._goal_keepout = config.placement.goal_keepout
-        self._hazard_keepout = config.placement.hazard_keepout
         self._placement_margin = config.placement.margin
         self._max_placement_attempts = config.placement.attempts_pos
         self._max_layout_attempts = config.placement.attempts_layout
 
         if self._debug:
             print(
-                f"SafePointGoal initialized with {self._num_hazards} hazards and {self._goal_manager.get_goal_count()} goals")
+                f"SafePointGoal initialized with {self._num_hazards} hazards and {self._num_goals} goals")
             cube_hazards = self._hazard_manager.get_hazards_by_type("cube")
             cylinder_hazards = self._hazard_manager.get_hazards_by_type("cylinder")
             print(f"Hazard composition: {len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders")
@@ -520,10 +297,9 @@ class SafePointGoal(PipelineEnv):
 
         # Build layout: goals then hazards using lax.scan
         num_candidates = self._max_placement_attempts
-        num_goals = self._goal_manager.get_goal_count()
 
         # Arrays to accumulate positions: max entries = agent + goal + hazards
-        max_entries = 1 + num_goals + self._num_hazards
+        max_entries = 1 + self._num_goals + self._num_hazards
         positions_xy = jp.zeros((max_entries, 2))
         keepouts = jp.zeros((max_entries,))
 
@@ -532,53 +308,30 @@ class SafePointGoal(PipelineEnv):
         keepouts = keepouts.at[0].set(self._agent_keepout)
         count = jp.array(1, dtype=jp.int32)
 
-        # Place goals with keepout, using scan so JIT stays happy
-        def place_one_goal(carry, _):
-            rkey, pos_xy, ko, cnt = carry
-            pos, rkey = _choose_valid_position(
-                rkey,
-                pos_xy,
-                ko,
-                cnt,
-                self._goal_keepout,
-                num_candidates,
-                self._placement_extents,
-                self._placement_margin,
-            )
-            pos_xy = pos_xy.at[cnt].set(pos[:2])
-            ko = ko.at[cnt].set(self._goal_keepout)
-            cnt = cnt + 1
-            return (rkey, pos_xy, ko, cnt), pos
+        # Place goals
+        (rng_layout, positions_xy, keepouts, count, goal_positions) = place_objects(
+            rng_key=rng_layout,
+            positions_xy=positions_xy,
+            keepouts_array=keepouts,
+            placed_count=count,
+            per_item_keepouts=self._goal_keepouts,
+            num_items=self._num_goals,
+            num_candidates=num_candidates,
+            placement_extents=self._placement_extents,
+            placement_margin=self._placement_margin,
+        )
 
-        (rng_layout, positions_xy, keepouts, count), goal_positions = jax.lax.scan(
-            place_one_goal,
-            (rng_layout, positions_xy, keepouts, count),
-            xs=jp.arange(num_goals),
-        )  # goal_positions shape: (G, 3)
-
-        # Scan over hazards
-        def place_one_hazard(carry, _):
-            rkey, pos_xy, ko, cnt = carry
-            pos, rkey = _choose_valid_position(
-                rkey,
-                pos_xy,
-                ko,
-                cnt,
-                self._hazard_keepout,
-                num_candidates,
-                self._placement_extents,
-                self._placement_margin,
-            )
-            # write pos into arrays
-            pos_xy = pos_xy.at[cnt].set(pos[:2])
-            ko = ko.at[cnt].set(self._hazard_keepout)
-            cnt = cnt + 1
-            return (rkey, pos_xy, ko, cnt), pos
-
-        (rng_layout, positions_xy, keepouts, count), hazard_positions = jax.lax.scan(
-            place_one_hazard,
-            (rng_layout, positions_xy, keepouts, count),
-            xs=jp.arange(self._num_hazards),
+        # Place hazards
+        (rng_layout, positions_xy, keepouts, count, hazard_positions) = place_objects(
+            rng_key=rng_layout,
+            positions_xy=positions_xy,
+            keepouts_array=keepouts,
+            placed_count=count,
+            per_item_keepouts=self._hazard_keepouts,
+            num_items=self._num_hazards,
+            num_candidates=num_candidates,
+            placement_extents=self._placement_extents,
+            placement_margin=self._placement_margin,
         )
 
         # Set goal and hazard positions in mocap
@@ -610,8 +363,9 @@ class SafePointGoal(PipelineEnv):
         }
 
         obs = self._get_obs(data)
-        reward, done = jp.zeros(2)
-        metrics = self._get_metrics(data, reward, 0.0, initial_dist_goal, initial_dist_goal, 0.0, 0.0, 0.0, 0.0)
+        reward, cost, ctrl_cost, goals_reached, goals_per_ep, goals_per_step, done = jp.zeros(7)
+        metrics = self._get_metrics(data, reward, cost, initial_dist_goal, initial_dist_goal, ctrl_cost,
+                                    goals_reached, goals_per_ep, goals_per_step)
 
         return State(data, obs, reward, done, metrics, info)
 
@@ -625,9 +379,9 @@ class SafePointGoal(PipelineEnv):
         # Get positions
         agent_pos = data.xpos[self._agent_body]
         hazard_positions = state.info['hazard_positions']
+        goal_positions = state.info['goal_positions']
 
-        # Handle multiple goals
-        goal_positions = state.info['goal_positions']  # (G,3)
+        # ============================== GOAL REWARD CALCULATION ==============================
 
         # Distances to all goals (XY)
         agent_xy = agent_pos[:2]
@@ -636,7 +390,8 @@ class SafePointGoal(PipelineEnv):
         is_cube = (self._goal_type_ids == 0)  # TODO extend for more types
 
         # vectorized SDFs
-        sdf_cube_2d = jax.vmap(lambda c, he, y: sdf_cube(agent_xy, c, he, y))(goals_xy, self._goal_box_he, self._goal_yaws)
+        sdf_cube_2d = jax.vmap(lambda c, he, y: sdf_cube(agent_xy, c, he, y))(goals_xy, self._goal_box_he,
+                                                                              self._goal_yaws)
         sdf_cylinder_2d = jax.vmap(lambda c, r: sdf_cylinder(agent_xy, c, r))(goals_xy, self._goal_radii)
 
         # pick per-type
@@ -652,73 +407,104 @@ class SafePointGoal(PipelineEnv):
         dist_reward = (last_dist_goal - dist_goal) * self._reward_distance
         goal_reward = self._reward_goal * num_goals_reached
 
-        # Build base obstacle arrays: start with agent + hazards only.
+        # ============================== GOAL RESPAWN LOGIC ==============================
+
+        # Build object arrays used during goal respawn checks:
+        # we treat the agent, all hazards, and all goals as objects with per-object keepouts.
         agent_xy = data.xpos[self._agent_body][:2]
-        haz_xy = data.mocap_pos[jp.array(self._hazard_mocap_ids)][:, :2]
-        goal_xy = goal_positions[:, :2]
+        hazard_positions_xy = hazard_positions[:, :2]
+        goal_positions_xy = goal_positions[:, :2]
 
-        max_entries = 1 + self._num_hazards + self._num_goals
+        total_objects = 1 + self._num_hazards + self._num_goals
 
-        obs_xy = jp.zeros((max_entries, 2))
-        obs_ko = jp.zeros((max_entries,))
+        # Object state buffers (centers and keepout radii), aligned by index:
+        #   0                                  -> agent
+        #   1 .. self._num_hazards             -> hazards
+        #   hazard_span_end .. total_objects -> goals
+        object_positions_xy = jp.zeros((total_objects, 2))
+        object_keepouts = jp.zeros((total_objects,))
 
-        # agent
-        obs_xy = obs_xy.at[0].set(agent_xy)
-        obs_ko = obs_ko.at[0].set(self._agent_keepout)
+        # Agent as object 0
+        object_positions_xy = object_positions_xy.at[0].set(agent_xy)
+        object_keepouts = object_keepouts.at[0].set(self._agent_keepout)
 
-        # hazards
-        obs_xy = obs_xy.at[1:1 + self._num_hazards].set(haz_xy)
-        obs_ko = obs_ko.at[1:1 + self._num_hazards].set(self._hazard_keepout)
+        # Hazards as objects [1 : 1 + H)
+        hazard_span_start = 1
+        hazard_span_end = hazard_span_start + self._num_hazards
+        object_positions_xy = object_positions_xy.at[hazard_span_start:hazard_span_end].set(hazard_positions_xy)
+        object_keepouts = object_keepouts.at[hazard_span_start:hazard_span_end].set(self._hazard_keepouts)
 
-        # goals (as obstacles, using their current positions)
-        gi0 = 1 + self._num_hazards  # first goal obstacle index
-        obs_xy = obs_xy.at[gi0:gi0 + self._num_goals].set(goal_xy)
-        obs_ko = obs_ko.at[gi0:gi0 + self._num_goals].set(self._goal_keepout)
+        # Goals as objects [hazard_span_end : hazard_span_end + G)
+        goal_span_start = hazard_span_end
+        goal_span_end = goal_span_start + self._num_goals
+        object_positions_xy = object_positions_xy.at[goal_span_start:goal_span_end].set(goal_positions_xy)
+        object_keepouts = object_keepouts.at[goal_span_start:goal_span_end].set(self._goal_keepouts)
 
-        active_cnt = jp.array(max_entries, dtype=jp.int32)
-        rng_goal = jax.random.PRNGKey(state.info['step_count'])
+        # All entries participate in separation during this step
+        active_object_count = jp.array(total_objects, dtype=jp.int32)
 
-        def place_or_keep(carry, i):
-            rkey, obs_xy, obs_ko, out_pos = carry
-            gi = gi0 + i  # obstacle slot for goal i
+        # Deterministic RNG for respawns this step
+        rng_for_goal_respawn = jax.random.PRNGKey(state.info["step_count"])
 
-            def place_new(_):
-                # Temporarily disable this goal’s own obstacle so it can move
-                obs_ko_tmp = obs_ko.at[gi].set(0.0)
+        def _place_or_keep_goal(carry, goal_index):
+            """
+            If goal `goal_index` was reached, sample a new valid position for it.
+            Otherwise keep its current position. We temporarily disable the goal's
+            own object keepout while sampling, to avoid blocking itself.
+            """
+            rng_key, obs_positions_xy, obs_keepouts, new_goal_positions_out = carry
+            object_slot = goal_span_start + goal_index  # where this goal sits in the object arrays
 
-                pos, rkey2 = _choose_valid_position(
-                    rkey,
-                    obs_xy,
-                    obs_ko_tmp,
-                    active_cnt,
-                    self._goal_keepout,
+            def _place_new(_):
+                # Temporarily disable this goal’s own keepout so it can move freely.
+                keepouts_without_self = obs_keepouts.at[object_slot].set(0.0)
+                goal_keepout_radius = self._goal_keepouts[goal_index]
+
+                new_pos_xyz, next_rng = choose_valid_position(
+                    rng_key,
+                    obs_positions_xy,
+                    keepouts_without_self,
+                    active_object_count,
+                    goal_keepout_radius,
                     self._max_placement_attempts,
                     self._placement_extents,
                     self._placement_margin,
                 )
-                # Update obstacle to the new location and restore keepout
-                obs_xy2 = obs_xy.at[gi].set(pos[:2])
-                obs_ko2 = obs_ko.at[gi].set(self._goal_keepout)
-                out_pos2 = out_pos.at[i].set(pos)
-                return (rkey2, obs_xy2, obs_ko2, out_pos2)
 
-            def keep_old(_):
-                # Keep position; it’s already in obs_xy/obs_ko and blocks others
-                out_pos2 = out_pos.at[i].set(goal_positions[i])
-                rkey2, _ = jax.random.split(rkey)
-                return (rkey2, obs_xy, obs_ko, out_pos2)
+                # Update object arrays at this slot with the new location and restore keepout.
+                updated_positions_xy = obs_positions_xy.at[object_slot].set(new_pos_xyz[:2])
+                updated_keepouts = obs_keepouts.at[object_slot].set(goal_keepout_radius)
 
-            return jax.lax.cond(reached_mask[i], place_new, keep_old, operand=None)
+                # Record the new goal pose in the output array (aligned to [0..G))
+                updated_goal_positions_out = new_goal_positions_out.at[goal_index].set(new_pos_xyz)
+                return (next_rng, updated_positions_xy, updated_keepouts, updated_goal_positions_out)
 
+            def _keep_old(_):
+                # Keep current goal position; it already blocks others via object arrays.
+                updated_goal_positions_out = new_goal_positions_out.at[goal_index].set(goal_positions[goal_index])
+                next_rng, _ = jax.random.split(rng_key)
+                return (next_rng, obs_positions_xy, obs_keepouts, updated_goal_positions_out)
+
+            return jax.lax.cond(reached_mask[goal_index], _place_new, _keep_old, operand=None)
+
+        # Compute new positions for all goals (only those reached will move)
         new_goal_positions = jp.zeros_like(goal_positions)
-        (rng_goal, obs_xy, obs_ko, new_goal_positions) = jax.lax.fori_loop(
-            0, self._num_goals, lambda i, c: place_or_keep(c, i), (rng_goal, obs_xy, obs_ko, new_goal_positions)
+        (rng_for_goal_respawn,
+         object_positions_xy,
+         object_keepouts,
+         new_goal_positions) = jax.lax.fori_loop(
+            0,
+            self._num_goals,
+            lambda i, carry: _place_or_keep_goal(carry, i),
+            (rng_for_goal_respawn, object_positions_xy, object_keepouts, new_goal_positions),
         )
 
-        # Scatter back to mocap
-        mpos = data.mocap_pos
-        mpos = mpos.at[jp.array(self._goal_mocap_ids)].set(new_goal_positions)
-        data = data.replace(mocap_pos=mpos)
+        # Scatter updated goal mocaps back into the physics state
+        mocap_pos = data.mocap_pos
+        mocap_pos = mocap_pos.at[jp.array(self._goal_mocap_ids)].set(new_goal_positions)
+        data = data.replace(mocap_pos=mocap_pos)
+
+        # ============================== METRICS AGGREGATION ==============================
 
         # Update counters
         updated_goals_reached = state.info['goals_reached_count'] + num_goals_reached
@@ -765,23 +551,6 @@ class SafePointGoal(PipelineEnv):
 
         return State(data, obs, reward, done.astype(jp.float32), metrics, new_info)
 
-    def _sample_position_in_extents(self, rng_key: jp.ndarray, keepout: float = 0.0) -> jp.ndarray:
-        """Sample a position within the constrained placement extents."""
-        min_x, min_y, max_x, max_y = self._placement_extents
-
-        # Apply keepout to reduce available area
-        min_x = min_x + keepout
-        min_y = min_y + keepout
-        max_x = max_x - keepout
-        max_y = max_y - keepout
-
-        # Sample position
-        pos_x = jax.random.uniform(rng_key, minval=min_x, maxval=max_x)
-        rng_key, subkey = jax.random.split(rng_key)
-        pos_y = jax.random.uniform(subkey, minval=min_y, maxval=max_y)
-
-        return jp.array([pos_x, pos_y, 0.09])  # Fixed z-height
-
     def _check_position_valid(self, candidate_pos: jp.ndarray, existing_positions: jp.ndarray,
                               keepout_distances: jp.ndarray) -> bool:
         """Check if a candidate position is valid given existing positions and keepout distances."""
@@ -802,13 +571,13 @@ class SafePointGoal(PipelineEnv):
         def sample_attempt(carry):
             attempt_rng, _ = carry
             attempt_rng, subkey = jax.random.split(attempt_rng)
-            candidate = self._sample_position_in_extents(subkey, keepout)
+            candidate = sample_position_in_extents(subkey, self._placement_extents, keepout)
             return attempt_rng, candidate
 
         # Try multiple attempts to find a valid position
         for attempt in range(self._max_placement_attempts):
             rng_key, subkey = jax.random.split(rng_key)
-            candidate = self._sample_position_in_extents(subkey, keepout)
+            candidate = sample_position_in_extents(subkey, self._placement_extents, keepout)
 
             if self._check_position_valid(candidate, existing_positions, existing_keepouts):
                 return candidate
@@ -816,7 +585,7 @@ class SafePointGoal(PipelineEnv):
         # If we can't find a valid position, return a fallback
         if self._debug:
             print(f"Warning: Could not find valid position after {self._max_placement_attempts} attempts")
-        return self._sample_position_in_extents(rng_key, keepout)  # Return anyway
+        return sample_position_in_extents(rng_key, self._placement_extents, keepout)  # Return anyway
 
     def _calculate_safety_cost(self, data: mjx.Data, hazard_positions: jp.ndarray) -> jp.ndarray:
         """Sum of per-hazard costs. Binary collision for collidables, proximity for others."""

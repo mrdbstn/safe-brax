@@ -98,9 +98,10 @@ class BaseHazard(ABC):
         """Return mass in kilograms computed from geometry (size/height) and density."""
         raise NotImplementedError
 
+    @abstractmethod
     def get_keepout_radius(self) -> float:
         """Return the keepout radius for placement constraints."""
-        return self.size + 0.1  # Default: size + small margin
+        raise NotImplementedError
 
 
 class CubeHazard(BaseHazard):
@@ -138,6 +139,10 @@ class CubeHazard(BaseHazard):
         rho = float(self.density)
         return rho * volume
 
+    def get_keepout_radius(self) -> float:
+        # box uses half-size in xy: safe radius is circumscribed
+        return float(jp.sqrt(2.0) * self.size)
+
 
 class CylinderHazard(BaseHazard):
     """Cylinder-shaped hazard with distance-based cost."""
@@ -172,6 +177,9 @@ class CylinderHazard(BaseHazard):
         volume = float(jp.pi) * r * r * h
         rho = float(self.density)
         return rho * volume
+
+    def get_keepout_radius(self) -> float:
+        return self.size  # Radius
 
 
 class HazardManager:

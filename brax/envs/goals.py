@@ -1,3 +1,4 @@
+from jax import numpy as jp
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Type, NamedTuple
 
@@ -51,9 +52,10 @@ class BaseGoal(ABC):
     def encode_static_params(self) -> PackedGoalParams:
         raise NotImplementedError
 
+    @abstractmethod
     def get_keepout_radius(self) -> float:
         """Return the keepout radius for placement constraints."""
-        return self.size + 0.1  # Default: size + small margin
+        raise NotImplementedError
 
     def update_position(self, new_position: tuple):
         """Update the goal's position (for respawning)."""
@@ -97,8 +99,10 @@ class CubeGoal(BaseGoal):
         return 0
 
     def get_keepout_radius(self) -> float:
-        """Return the keepout radius for placement constraints."""
-        return max(self.dimensions) + 0.1
+        # half-extents in xy
+        hx, hy = self.dimensions[0], self.dimensions[1]
+        # use circumscribed circle so rotation can’t sneak overlap
+        return float(jp.sqrt(hx * hx + hy * hy))
 
     def encode_static_params(self) -> PackedGoalParams:
         hx, hy = (float(self.dimensions[0]), float(self.dimensions[1]))
@@ -140,6 +144,9 @@ class CylinderGoal(BaseGoal):
     @property
     def type_id(self) -> int:
         return 1
+
+    def get_keepout_radius(self) -> float:
+        return self.size  # radius
 
     def encode_static_params(self) -> PackedGoalParams:
         return PackedGoalParams(
