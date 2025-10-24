@@ -59,7 +59,7 @@ def default_config() -> config_dict.ConfigDict:
         placement=config_dict.create(
             extents=(-2.5, -2.5, 2.5, 2.5),  # [min_x, min_y, max_x, max_y]
             agent_keepout=0.1,  # Keepout radius around agent
-            margin=0.05,  # Additional spacing margin for placement
+            margin=0.01,  # Additional spacing margin for placement
             attempts_pos=100,  # Max attempts to place a single object
             attempts_layout=1000,  # Max attempts to build a full valid layout
         ),
