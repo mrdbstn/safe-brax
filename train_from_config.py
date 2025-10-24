@@ -292,7 +292,7 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
 
     # Save model
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_dir = config.get('model_dir', 'models')
+    model_dir = config.model_dir
     os.makedirs(model_dir, exist_ok=True)
     model_path = f'{model_dir}/{env_name.lower()}_{alg_name}_seed{seed}_{timestamp}'
     brax_model.save_params(model_path, params)
