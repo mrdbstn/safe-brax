@@ -1,13 +1,31 @@
 import os
 from pathlib import Path
 
-from brax.envs.SafePointGoal import SafePointGoal_8Hazards
+from brax.envs.SafePointGoal import default_config, SafePointGoal
 from train_from_config import record_episode_video
 from utils import make_circular_policy
 
 
-def test_record_video_circular(out_path):
-    env = SafePointGoal_8Hazards()
+def test_record_video_cubical():
+    """Test recording a video of circular motion with cubical hazards."""
+    num_hazards = 8
+    out_path = Path(__file__).parent / "videos" / f"cubical_hazards_{num_hazards}.mp4"
+
+    print(f"\nRecording an episode with {num_hazards} cubical hazards...")
+    print(f"Output path: {out_path}")
+    start_time = os.times()
+
+    cfg = default_config()
+    cfg.goals.type = 'cube'
+    cfg.goals.count = 1
+    cfg.hazards.specs = [
+        {"type": "cube", "count": num_hazards},
+    ]
+
+    # Create an environment with cylinder hazards
+    env = SafePointGoal(cfg)
+    print(f"Environment creation took {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards")
+    start_time = os.times()
 
     # Make the constant-action circular policy
     make_infer = make_circular_policy(
@@ -17,6 +35,8 @@ def test_record_video_circular(out_path):
         thrust_idx=0,  # actuator 0 = site motor along x
         yaw_idx=1,  # actuator 1 = velocity actuator on hinge 'z'
     )
+    print(f"Policy creation {os.times()[4] - start_time[4]:.2f} seconds")
+    start_time = os.times()
 
     record_episode_video(
         env=env,
@@ -26,11 +46,14 @@ def test_record_video_circular(out_path):
         camera="fixedfar",
         width=640,
         height=480,
-        fps=500,
+        fps=50,
+        frame_stride=10,
         out_name=str(out_path.name),
         log_to_wandb=False,
         seed=0,
+        show_metrics=True,  # Enable cost display on video
     )
+    print(f"✓ Test completed in {os.times()[4] - start_time[4]:.2f} seconds")
 
     saved = os.path.join("videos", out_path.name)
     assert os.path.exists(saved), f"Expected video at {saved}"
@@ -38,5 +61,7 @@ def test_record_video_circular(out_path):
 
 
 if __name__ == "__main__":
-    file_path = Path(__file__).parent / "videos" / "circle.mp4"
-    test_record_video_circular(file_path)
+    print("\n" + "=" * 60)
+    test_record_video_cubical()
+    print("\n" + "=" * 60)
+    print("✓ Video successfully recorded with cubical hazards.")

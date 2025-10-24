@@ -6,29 +6,43 @@ from train_from_config import record_episode_video
 from utils import make_multi_directional_policy
 
 
-def test_record_video_circular_cylinders():
+def test_record_video_mixed_hazards():
     """Test recording a video of circular motion with cylinder hazards."""
-    num_hazards = 8
-    out_path = Path(__file__).parent / "videos" / f"cylinder_hazards_{num_hazards}.mp4"
+    out_path = Path(__file__).parent / "videos" / f"mixed_hazards.mp4"
 
-    print(f"\nRecording an episode with {num_hazards} cylinder hazards...")
+    print("\nRecording an episode with mixed hazards...")
     print(f"Output path: {out_path}")
     start_time = os.times()
 
     cfg = default_config()
+    # cfg.placement.extents = (-3.0, -3.0, 3.0, 3.0)
+    cfg.placement.extents = (-2.0, -2.0, 2.0, 2.0)
     cfg.goals.type = 'cylinder'
     cfg.goals.count = 2
-    cfg.goals.size = 0.4
+    cfg.goals.size = 0.1
     cfg.goals.height = 0.2
     cfg.hazards.specs = [
-        {"type": "cylinder", "count": num_hazards, "size": 0.3, "height": 0.01, "collidable": False},
+        # 1) 3 cube hazards, size 0.3, height 0.3, non-collidable
+        {"type": "cube", "count": 3, "size": 0.3, "height": 0.3, "collidable": False},
+
+        # 2) 2 cube hazards, size 0.2, height 0.5, collidable
+        {"type": "cube", "count": 2, "size": 0.2, "height": 0.5, "collidable": True},
+
+        # 3) 4 cylinder hazards, radius 0.3, height 0.01, non-collidable
+        {"type": "cylinder", "count": 4, "size": 0.3, "height": 0.01, "collidable": False},
+
+        # 4) 3 cylinder hazards, radius 0.3, height 0.4, collidable
+        {"type": "cylinder", "count": 3, "size": 0.3, "height": 0.4, "collidable": True},
     ]
 
     # Create an environment with cylinder hazards
     env = SafePointGoal(cfg)
-    print(f"Environment creation took {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards")
+    cube_hazards = env._hazard_manager.get_hazards_by_type("cube")
+    cylinder_hazards = env._hazard_manager.get_hazards_by_type("cylinder")
+    print(
+        f"✓ Environment created in {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards ({len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders)")
     start_time = os.times()
-    steps = 2500
+    steps = 5000
 
     # Make a deterministic policy
     make_infer = make_multi_directional_policy(
@@ -37,10 +51,10 @@ def test_record_video_circular_cylinders():
         thrust_idx=0,  # actuator 0 = site motor along x
         yaw_idx=1,  # actuator 1 = velocity actuator on hinge 'z'
         steps=steps,  # total steps in episode
-        num_yaw_values=5,  # number of different yaw values to sample
+        num_yaw_values=10,  # number of different yaw values to sample
         rng_seed=8,
     )
-    print(f"Policy creation {os.times()[4] - start_time[4]:.2f} seconds")
+    print(f"✓ Policy created {os.times()[4] - start_time[4]:.2f} seconds")
     start_time = os.times()
 
     # Record the episode
@@ -56,7 +70,7 @@ def test_record_video_circular_cylinders():
         frame_stride=10,
         out_name=str(out_path.name),
         log_to_wandb=False,
-        seed=0,
+        seed=6,
         show_metrics=True,  # Enable cost display on video
     )
     print(f"✓ Test completed in {os.times()[4] - start_time[4]:.2f} seconds")
@@ -71,6 +85,6 @@ def test_record_video_circular_cylinders():
 
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    test_record_video_circular_cylinders()
+    test_record_video_mixed_hazards()
     print("\n" + "=" * 60)
-    print("✓ Video successfully recorded with cylinder hazards.")
+    print("✓ Video successfully recorded with mixed hazards.")

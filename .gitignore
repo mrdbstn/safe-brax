@@ -19,7 +19,8 @@ __pycache__
 /models/
 /runs/
 /trajectories/
-
+/videos/
+/tests/videos/
 
 
 # Notebook outputs and metrics
@@ -121,4 +122,3 @@ sysinfo.txt
 *.unitypackage
 
 UnitySDK.log
-/videos/

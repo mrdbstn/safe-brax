@@ -6,6 +6,7 @@ Based on mourad_lag.ipynb training approach.
 import argparse
 import csv
 import functools
+import inspect
 import json
 import os
 import time
@@ -18,9 +19,8 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
-from jax import lax
-from matplotlib import pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
+from matplotlib import pyplot as plt
 
 from brax import envs
 from brax.envs import Env
@@ -82,7 +82,6 @@ except ImportError:
 from brax.io import model as brax_model
 from brax.io import json as brax_json
 import wandb
-from ml_collections import config_dict
 
 
 # Configure environment for GPU usage
@@ -106,29 +105,6 @@ def setup_gpu_environment():
             'Something went wrong during installation. Check the error message above '
             'for more information.'
         ) from e
-
-
-def get_default_env_config() -> config_dict.ConfigDict:
-    """Returns the default config for PointHazardGoal environment."""
-    config = config_dict.create(
-        # New safety-gymnasium reward parameters
-        reward_distance=1.0,
-        reward_goal=10.0,
-        goal_size=0.7,
-        reward_orientation=False,
-        reward_orientation_scale=0.002,
-        reward_orientation_body='agent',
-        ctrl_cost_weight=0.001,
-        hazard_size=0.7,
-        # Other parameters
-        terminate_when_unhealthy=True,
-        healthy_z_range=(0.05, 0.3),
-        reset_noise_scale=0.005,
-        exclude_current_positions_from_observation=True,
-        max_velocity=5.0,
-        debug=False,
-    )
-    return config
 
 
 class CostExtraWrapper(Wrapper):
@@ -238,7 +214,13 @@ def get_algorithm_train_fn(alg_name: str):
     return train_fn
 
 
-def train_from_config(config: Dict[str, Any], seed: int, use_wandb: bool = True,
+def filter_kwargs_for_fn(fn, cfg):
+    sig = inspect.signature(fn)
+    valid_keys = set(sig.parameters.keys())
+    return {k: v for k, v in cfg.items() if k in valid_keys}
+
+
+def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = True,
                       verbose: bool = True) -> tuple[Any, Any, Any, Env]:
     """
     Train an agent using the provided configuration.
@@ -246,19 +228,16 @@ def train_from_config(config: Dict[str, Any], seed: int, use_wandb: bool = True,
     Returns:
         Tuple of (make_inference_fn, params, final_eval_metrics)
     """
-    # Extract config values with notebook defaults
-    # Prefer 'env_name' if provided, fallback to 'env' for backward compatibility
-    env_name = config.get('env_name', config.get('env'))
+    env_name = config.env_name
     if env_name is None:
         raise ValueError("Config must include 'env' or 'env_name'.")
-    alg_name = config.get('alg', 'ppo')
+    alg_name = config.alg
 
-    num_timesteps = config.get('num_timesteps', 100_000_000)
+    num_timesteps = config.num_timesteps
 
-    # Create environments (pass through env_kwargs if provided)
-    env_kwargs = config.get('env_kwargs', {})
-    train_environment = envs.get_environment(env_name, **env_kwargs)
-    eval_env = envs.get_environment(env_name, **env_kwargs)
+    # Create environments
+    train_environment = envs.get_environment(env_name)
+    eval_env = envs.get_environment(env_name)
 
     print(f"Training environment '{env_name}' instantiated.")
     print(f"Evaluation environment '{env_name}' instantiated.")
@@ -266,23 +245,14 @@ def train_from_config(config: Dict[str, Any], seed: int, use_wandb: bool = True,
     # Setup wandb if requested
     if use_wandb:
         # Prepare wandb config
-        wandb_config = config.copy()
+        wandb_config = vars(config).copy()
         wandb_config['seed'] = seed
-
-        # Add environment config if available
-        env_config = get_default_env_config().to_dict()
-        # Merge any environment overrides provided via config
-        if isinstance(env_kwargs, dict):
-            cfg_over = env_kwargs.get('config_overrides', {})
-            if isinstance(cfg_over, dict):
-                env_config.update(cfg_over)
-        wandb_config.update(env_config)
 
         # Initialize wandb
         run_name = f"{env_name}_{alg_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_seed{seed}"
-        wandb_project = config.get('wandb_project', 'safe_brax')
-        wandb_group = config.get('wandb_group', None)
-        wandb_tags = config.get('wandb_tags', [])
+        wandb_project = config.wandb_project
+        wandb_group = config.wandb_group
+        wandb_tags = config.wandb_tags
 
         wandb.init(
             project=wandb_project,
@@ -293,79 +263,11 @@ def train_from_config(config: Dict[str, Any], seed: int, use_wandb: bool = True,
         )
 
     # Setup metrics collection
-    bound_progress_fn = functools.partial(
-        custom_progress_fn,
-        use_wandb=use_wandb,
-        verbose=verbose,
-    )
+    progress_fn = functools.partial(custom_progress_fn, use_wandb=use_wandb, verbose=verbose,)
 
     # Get the appropriate training function
     train_fn_base = get_algorithm_train_fn(alg_name)
-
-    # Prepare training function arguments
-    train_kwargs = {
-        # core
-        'num_timesteps': num_timesteps,
-        'max_devices_per_host': config.get('max_devices_per_host', None),
-        'seed': seed,
-
-        # high-level control
-        'wrap_env': config.get('wrap_env', True),
-        'madrona_backend': config.get('madrona_backend', False),
-        'augment_pixels': config.get('augment_pixels', False),
-
-        # env wrapper
-        'num_envs': config.get('num_envs', 2048),
-        'episode_length': config.get('episode_length', 2000),
-        'action_repeat': config.get('action_repeat', 1),
-        'wrap_env_fn': None,  # keep default
-        'randomization_fn': None,  # keep default
-
-        # algo params
-        'learning_rate': config.get('learning_rate', 5e-4),
-        'entropy_cost': config.get('entropy_cost', 5e-3),
-        'discounting': config.get('discounting', 0.99),
-        'unroll_length': config.get('unroll_length', 8),
-        'batch_size': config.get('batch_size', 1024),
-        'num_minibatches': config.get('num_minibatches', 32),
-        'num_updates_per_batch': config.get('num_updates_per_batch', 6),
-        'num_resets_per_eval': config.get('num_resets_per_eval', 0),
-        'normalize_observations': config.get('normalize_observations', True),
-        'reward_scaling': config.get('reward_scaling', 0.1),
-        'max_grad_norm': config.get('max_grad_norm', None),
-        'normalize_advantage': config.get('normalize_advantage', True),
-
-        # eval
-        'num_evals': config.get('num_evals', 5),
-        'eval_env': eval_env,
-        'num_eval_envs': config.get('num_eval_envs', 128),
-        'deterministic_eval': config.get('deterministic_eval', False),
-
-        # training metrics
-        'log_training_metrics': True,
-        'training_metrics_steps': int(config.get('training_metrics_steps', 1_000_000)),
-
-        # callbacks
-        'progress_fn': bound_progress_fn,
-        'policy_params_fn': (lambda *args, **kwargs: None),
-
-        # checkpointing
-        'save_checkpoint_path': config.get('save_checkpoint_path', None),
-        'restore_checkpoint_path': config.get('restore_checkpoint_path', None),
-        'restore_params': None,  # programmatic only
-        'restore_value_fn': config.get('restore_value_fn', True),
-    }
-
-    # Add algorithm-specific parameters
-    if 'ppo' in alg_name:
-        train_kwargs['gae_lambda'] = config.get('gae_lambda', 0.95)
-        train_kwargs['clipping_epsilon'] = config.get('clipping_epsilon', 0.3)
-
-    # PPO-Lagrange specific parameters
-    if 'lagrange' in alg_name:
-        train_kwargs['safety_bound'] = config.get('safety_bound', 0.2)
-        train_kwargs['lagrangian_coef_rate'] = config.get('lagrangian_coef_rate', 0.01)
-        train_kwargs['initial_lambda_lagr'] = config.get('initial_lambda_lagr', 0.0)
+    train_kwargs = filter_kwargs_for_fn(train_fn_base, vars(config))
 
     # Create the training function
     train_fn = functools.partial(train_fn_base, **train_kwargs)
@@ -375,7 +277,7 @@ def train_from_config(config: Dict[str, Any], seed: int, use_wandb: bool = True,
     make_inference_fn, params, final_eval_metrics = train_fn(
         environment=train_environment,
         eval_env=eval_env,
-        progress_fn=bound_progress_fn
+        progress_fn=progress_fn
     )
     print("Training finished.")
 
@@ -709,7 +611,7 @@ def create_rollout_plots(rollout_metrics_data: Dict[str, List], env_name: str) -
 
 
 def record_episode_video(
-        env,  # a Brax env (same as for eval)
+        env,
         make_inference_fn,
         params,
         steps: int = 2500,
@@ -717,6 +619,7 @@ def record_episode_video(
         width: int = 320,
         height: int = 240,
         fps: int = 100,
+        frame_stride=1,
         out_name: str = "rollout.mp4",
         log_to_wandb: bool = True,
         seed: int = 0,
@@ -731,47 +634,74 @@ def record_episode_video(
     # 1) Ensure headless GPU rendering (you might need to do this before importing mujoco)
     os.environ.setdefault("MUJOCO_GL", "egl")
 
+    start_time = os.times()
+
     # 2) JIT policy
-    infer = make_inference_fn(params)
+    infer = jax.jit(make_inference_fn(params))
+    reset_fn = env.reset
+    step_fn = env.step
 
     @jax.jit
     def rollout(key):
-        state = env.reset(key)
+        state = reset_fn(key)
 
-        def step_fn(carry, _):
+        def step_body(carry, _):
             state, key = carry
             key, sk = jax.random.split(key)
             action, _ = infer(state.obs, sk)
-            next_state = env.step(state, action)
-            # Return both pipeline state and full state for cost access
-            return (next_state, key), (next_state.pipeline_state, next_state)
+            next_state = step_fn(state, action)
 
-        (final_state, _), (frames, states) = lax.scan(step_fn, (state, key), xs=None, length=steps)
-        return frames, states, final_state
+            frame = next_state.pipeline_state  # for render
+            reward = next_state.reward  # scalar
+            cost = next_state.info["cost"]  # scalar
+
+            return (next_state, key), (frame, reward, cost)
+
+        (final_state, _), (frames, rewards, costs) = jax.lax.scan(
+            step_body, (state, key), xs=None, length=steps
+        )
+        return frames, rewards, costs, final_state
 
     # 3) Run rollout to collect frames
     key = jax.random.PRNGKey(seed)
-    frames_batched, states_batched, final_state = rollout(key)  # PyTree with leading T
+    frames_batched, rewards_batched, costs_batched, final_state = rollout(key)  # PyTree with leading T
+
+    print("Rollout took %.2f seconds." % (os.times()[4] - start_time[4]))
+    start_time = os.times()
+
     frames_batched = jax.device_get(frames_batched)
-    states_batched = jax.device_get(states_batched)
 
-    # Unstack to a Python list of per-step pipeline states
-    leaves = jax.tree_util.tree_leaves(frames_batched)
+    T = int(frames_batched.qpos.shape[0])
+    frames = [jax.tree.map(lambda x: x[i], frames_batched) for i in range(T)]
 
-    def index_t(t):
-        return jax.tree.map(lambda x: x[t], frames_batched)
+    # Build indices of frames we keep
+    keep_idx = np.arange(0, T, frame_stride, dtype=int)
 
-    def index_state_t(t):
-        return jax.tree.map(lambda x: x[t], states_batched)
+    # Downsample frames
+    frames = [frames[i] for i in keep_idx]
 
-    frames = [index_t(t) for t in range(int(leaves[0].shape[0]))]
-    states = [index_state_t(t) for t in range(int(leaves[0].shape[0]))] if show_metrics else None
+    # Keep full-resolution rewards/costs for exact cumulative values
+    rewards_full = np.asarray(jax.device_get(rewards_batched))
+    costs_full = np.asarray(jax.device_get(costs_batched))
+
+    # Exact cumulative totals at the exact original step indices that we render
+    cum_rewards_full = np.cumsum(rewards_full)
+    cum_costs_full = np.cumsum(costs_full)
+
+    cum_rewards_at_frames = cum_rewards_full[keep_idx]
+    cum_costs_at_frames = cum_costs_full[keep_idx]
+
+    # If you still want per-frame (downsampled) instantaneous values for something else:
+    rewards = rewards_full[keep_idx]
+    costs = costs_full[keep_idx]
 
     # 4) Render the episode
     rendering = env.render(frames, width=width, height=height, camera=camera)
+    print("Rendering took %.2f seconds." % (os.times()[4] - start_time[4]))
 
-    # 5) Add reward/cost overlay if requested
-    if show_metrics and states is not None:
+    # 5) Add reward/cost overlay
+    if show_metrics:
+        start_time = os.times()
         rendering_with_metrics = []
         try:
             # Try to load a font, fallback to default if not available
@@ -779,44 +709,39 @@ def record_episode_video(
         except (OSError, IOError):
             font = ImageFont.load_default()
 
-        reward = 0.0
-        cost = 0.0
-
-        for i, (frame, state) in enumerate(zip(rendering, states)):
+        for i, (frame, reward, cost) in enumerate(zip(rendering, rewards, costs)):
             # Convert frame to PIL Image
             img = Image.fromarray(frame.astype(np.uint8))
             draw = ImageDraw.Draw(img)
 
             # Extract metrics from the state info
-            reward += state.reward.item()
-            cost += state.info['cost'].item()
+            total_reward = float(cum_rewards_at_frames[i])
+            total_cost = float(cum_costs_at_frames[i])
 
             # Add cost text overlay
-            reward_text = f"Reward: {reward:.2f}"
-            cost_text = f"Cost: {cost:.2f}"
+            reward_text = f"Reward: {total_reward:.2f}"
+            cost_text = f"Cost: {total_cost:.2f}"
 
             # Color
             text_color_reward = (50, 220, 50)  # Green text
             text_color_cost = (230, 60, 60)  # Red text
-            outline_color = (0, 0, 0)    # Black outline
+            outline_color = (0, 0, 0)  # Black outline
 
             # Position text in top-left corner
             x_rew, y_rew = 10, 10
             x_cost, y_cost = 10, 40
 
             # Draw text with outline for better visibility
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    if dx != 0 or dy != 0:
-                        draw.text((x_rew + dx, y_rew + dy), reward_text, font=font, fill=outline_color)
-                        draw.text((x_cost + dx, y_cost + dy), cost_text, font=font, fill=outline_color)
-            draw.text((x_rew, y_rew), reward_text, font=font, fill=text_color_reward)
-            draw.text((x_cost, y_cost), cost_text, font=font, fill=text_color_cost)
+            draw.text((x_rew, y_rew), reward_text, font=font, fill=text_color_reward, stroke_width=2,
+                      stroke_fill=outline_color)
+            draw.text((x_cost, y_cost), cost_text, font=font, fill=text_color_cost, stroke_width=2,
+                      stroke_fill=outline_color)
 
             # Convert back to numpy array
             rendering_with_metrics.append(np.array(img))
 
         rendering = rendering_with_metrics
+        print("Overlay text took %.2f seconds." % (os.times()[4] - start_time[4]))
 
     # 6) Save mp4 (and log)
     os.makedirs("videos", exist_ok=True)
@@ -847,7 +772,6 @@ def main():
 
     # --- Experiment Control ---
     parser.add_argument("--quiet", action="store_true", help="Reduce verbosity")
-    parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
     parser.add_argument("--skip-rollout", action="store_true", help="Skip rollout evaluation after training")
     parser.add_argument("--skip-video", action="store_true", help="Skip video recording after training")
     parser.add_argument("--out_dir", type=str, default="runs/experimental_results",
@@ -856,18 +780,14 @@ def main():
 
     # --- Environment ---
     parser.add_argument("--env_name", type=str, default="safe_point_goal", help="Env name (preferred)")
-    parser.add_argument("--env", type=str, default="point_resetting_goal_random_hazard_lidar_sensor_obs",
-                        help="Alternate env key (legacy)")
     parser.add_argument("--env_kwargs", type=_json_type, default={
         "config_overrides": {
             "ctrl_cost_weight": 0.001,
-            "goal_size": 0.7,
             "reward_goal": 10.0,
             "reward_distance": 3,
             "reward_orientation": False,
             "reward_orientation_scale": 0.002,
         },
-        # "num_hazards": 8,
     }, help="JSON string or path for env_kwargs")
 
     # --- Algorithm ---
@@ -929,20 +849,13 @@ def main():
     parser.add_argument("--video_fps", type=int, default=30, help="Output video FPS")
     parser.add_argument("--video_length", type=int, default=2500, help="Number of frames in the video")
 
-    args = parser.parse_args()
+    config = parser.parse_args()
 
     # Setup GPU environment
     setup_gpu_environment()
 
-    # Load config
-    config = load_config(args.config)
-
-    # Override config with command line args if provided
-    for key, value in vars(args).items():
-        config[key] = value
-
     # Run training for each seed
-    for seed in args.seeds:
+    for seed in config.seeds:
         print(f"\n{'=' * 50}")
         print(f"Running experiment with seed {seed}")
         print(f"{'=' * 50}\n")
@@ -951,58 +864,58 @@ def main():
         make_inference_fn, params, final_metrics, eval_env = train_from_config(
             config=config,
             seed=seed,
-            use_wandb=not args.no_wandb,
-            verbose=not args.quiet
+            use_wandb=config.use_wandb,
+            verbose=not config.quiet
         )
 
         # Perform rollout evaluation if not skipped
-        if not args.skip_rollout:
+        if not config.skip_rollout:
             print(f"\nPerforming rollout evaluation...")
             rollout_env_name = config.get('env_name', config.get('env'))
             rollout_metrics = collect_rollout_metrics(
                 env_name=rollout_env_name,
                 make_inference_fn=make_inference_fn,
                 params=params,
-                num_steps=args.rollout_steps,
+                num_steps=config.rollout_steps,
                 seed=seed,
                 save_trajectory=True,
                 save_plots=True,
                 env_kwargs=config.get('env_kwargs', {})
             )
 
-        if not args.skip_video:
+        if not config.skip_video:
             vid = record_episode_video(
                 env=eval_env,
                 make_inference_fn=make_inference_fn,
                 params=params,
-                steps=args.video_length,
+                steps=config.video_length,
                 camera=config.get("camera", 0),
                 width=config.get("video_width", 320),
                 height=config.get("video_height", 240),
                 fps=int(config.get("video_fps", 30)),
                 out_name=f"{config.get('env_name', 'env')}_{config.get('alg', 'algo')}_seed{seed}.mp4",
-                log_to_wandb=not args.no_wandb,
+                log_to_wandb=not config.no_wandb,
                 seed=seed,
             )
             print("Saved video:", vid)
 
         # PPO-C verify shaping log if requested
-        if config.get('alg') in ('ppo_cost', 'ppoc') and args.ppoc_verify_log_steps > 0:
+        if config.get('alg') in ('ppo_cost', 'ppoc') and config.ppoc_verify_log_steps > 0:
             print("\nRunning PPO-C shaping verification rollout...")
             rollout_env_name = config.get('env_name', config.get('env'))
             _ = verify_ppoc_shaping(
                 env_name=rollout_env_name,
                 make_inference_fn=make_inference_fn,
                 params=params,
-                num_steps=args.ppoc_verify_log_steps,
+                num_steps=config.ppoc_verify_log_steps,
                 seed=seed,
-                cost_weight=float(config.get('cost_weight', args.ppoc_cost_weight)),
+                cost_weight=float(config.get('cost_weight', config.ppoc_cost_weight)),
                 env_kwargs=config.get('env_kwargs', {}),
                 out_dir=config.get('out_dir', 'runs/smoke')
             )
 
         # Finish wandb run if active
-        if not args.no_wandb and wandb.run is not None:
+        if not config.no_wandb and wandb.run is not None:
             wandb.finish()
 
     print("\nAll experiments completed!")
