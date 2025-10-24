@@ -871,7 +871,7 @@ def main():
         # Perform rollout evaluation if not skipped
         if not config.skip_rollout:
             print(f"\nPerforming rollout evaluation...")
-            rollout_env_name = config.get('env_name', config.get('env'))
+            rollout_env_name = config.env_name
             rollout_metrics = collect_rollout_metrics(
                 env_name=rollout_env_name,
                 make_inference_fn=make_inference_fn,
@@ -889,33 +889,32 @@ def main():
                 make_inference_fn=make_inference_fn,
                 params=params,
                 steps=config.video_length,
-                camera=config.get("camera", 0),
-                width=config.get("video_width", 320),
-                height=config.get("video_height", 240),
-                fps=int(config.get("video_fps", 30)),
-                out_name=f"{config.get('env_name', 'env')}_{config.get('alg', 'algo')}_seed{seed}.mp4",
-                log_to_wandb=not config.no_wandb,
+                camera=config.camera,
+                width=config.video_width,
+                height=config.video_height,
+                fps=config.video_fps,
+                out_name=f"{config.env_name}_{config.alg}_seed{seed}.mp4",
+                log_to_wandb=config.use_wandb,
                 seed=seed,
             )
             print("Saved video:", vid)
 
         # PPO-C verify shaping log if requested
-        if config.get('alg') in ('ppo_cost', 'ppoc') and config.ppoc_verify_log_steps > 0:
+        if config.alg in ('ppo_cost', 'ppoc') and config.ppoc_verify_log_steps > 0:
             print("\nRunning PPO-C shaping verification rollout...")
-            rollout_env_name = config.get('env_name', config.get('env'))
+            rollout_env_name = config.env_name
             _ = verify_ppoc_shaping(
                 env_name=rollout_env_name,
                 make_inference_fn=make_inference_fn,
                 params=params,
                 num_steps=config.ppoc_verify_log_steps,
                 seed=seed,
-                cost_weight=float(config.get('cost_weight', config.ppoc_cost_weight)),
-                env_kwargs=config.get('env_kwargs', {}),
-                out_dir=config.get('out_dir', 'runs/smoke')
+                cost_weight=config.cost_weight,
+                out_dir=config.out_dir
             )
 
         # Finish wandb run if active
-        if not config.no_wandb and wandb.run is not None:
+        if config.use_wandb and wandb.run is not None:
             wandb.finish()
 
     print("\nAll experiments completed!")
