@@ -186,10 +186,10 @@ def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) 
 def get_algorithm_train_fn(alg_name: str):
     """Get the appropriate training function based on algorithm name."""
     # Try to find the best available PPO-Lagrange version
-    if ppo_lagrange_v3_train is not None:
-        default_ppol = ppo_lagrange_v3_train
-    elif ppo_lagrange_v2_train is not None:
+    if ppo_lagrange_v2_train is not None:
         default_ppol = ppo_lagrange_v2_train
+    elif ppo_lagrange_v3_train is not None:
+        default_ppol = ppo_lagrange_v3_train
     elif ppo_lagrange_train is not None:
         default_ppol = ppo_lagrange_train
     else:
