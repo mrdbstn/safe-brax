@@ -837,8 +837,6 @@ def main():
     parser.add_argument("--wandb_project", type=str, default="safe-brax-experimental-results", help="W&B project")
     parser.add_argument("--wandb_group", type=str, default="pointgoal-baselines", help="W&B group")
     parser.add_argument("--wandb_tags", type=str, nargs='+', help="JSON list or path of tags")
-    parser.add_argument("--wandb_log_interval", type=int, default=50000,
-                        help="Steps between wandb logs (keeps fine-grained local metrics but reduces wandb frequency)")
 
     # --- Video Recording ---
     parser.add_argument("--camera", type=str, default="fixedfar",
