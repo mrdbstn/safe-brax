@@ -1,0 +1,85 @@
+<mujoco model="golf">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
+
+  <option timestep="0.002" iterations="50" solver="Newton" tolerance="1e-10"/>
+
+  <default>
+    <joint armature="0.01" damping="0.1" limited="true"/>
+    <geom conaffinity="1" condim="3" friction="0.8 0.005 0.0001" rgba="0.8 0.6 0.4 1" margin="0.001"/>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0.0 0.0 0.0" width="512" height="512"/>
+    <texture name="ground" type="2d" builtin="checker" rgb1="0.2 0.6 0.2" rgb2="0.1 0.5 0.1" width="512" height="512" mark="cross" markrgb="1 1 1"/>
+    <material name="ground_mat" texture="ground" texrepeat="10 10" texuniform="true" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" diffuse="0.6 0.6 0.6" specular="0.3 0.3 0.3" pos="0 0 4" dir="0 0 -1"/>
+    <light directional="true" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" pos="0 0 3" dir="0 0.2 -1"/>
+
+    <!-- Ground plane -->
+    <geom name="floor" type="plane" size="10 10 0.1" rgba="0.2 0.6 0.2 1" material="ground_mat" condim="3" friction="0.8 0.005 0.0001"/>
+
+    <!-- Golf Ball -->
+    <body name="ball" pos="0 0 0.02135">
+      <joint name="ball_free" type="free" limited="false" damping="0.001"/>
+      <geom name="ball_geom" type="sphere" size="0.02135" rgba="1 1 1 1" mass="0.0459" friction="0.6 0.005 0.0001"/>
+      <site name="ball_site" pos="0 0 0" size="0.001"/>
+    </body>
+
+    <!-- Golf Hole (Cup) with Flag -->
+    <body name="hole" pos="3 0 0">
+      <!-- Cup -->
+      <geom name="cup_base" type="cylinder" pos="0 0 -0.05" size="0.054 0.05" rgba="0.15 0.15 0.15 1" friction="0.3 0.005 0.0001"/>
+      <geom name="cup_interior" type="cylinder" pos="0 0 -0.04" size="0.05 0.04" rgba="0.1 0.1 0.1 1" friction="0.2 0.005 0.0001"/>
+
+      <!-- Flag pole -->
+      <geom name="flag_pole" type="cylinder" fromto="0 0 0 0 0 0.6" size="0.004" rgba="0.9 0.9 0.9 1" mass="0.02"/>
+
+      <!-- Flag (triangular shape using boxes) -->
+      <geom name="flag_main" type="box" pos="0 0.08 0.55" size="0.001 0.08 0.04" rgba="1 0.1 0.1 1" mass="0.001"/>
+      <geom name="flag_triangle1" type="box" pos="0 0.12 0.57" size="0.001 0.04 0.02" rgba="1 0.1 0.1 1" mass="0.001" euler="0 0 -20"/>
+      <geom name="flag_triangle2" type="box" pos="0 0.12 0.53" size="0.001 0.04 0.02" rgba="1 0.1 0.1 1" mass="0.001" euler="0 0 20"/>
+
+      <!-- Marker site for hole position -->
+      <site name="hole_site" pos="0 0 0" size="0.05 0.05 0.001" rgba="0 0 0 0.3"/>
+    </body>
+
+    <!-- Golf Club -->
+    <body name="club_base" pos="-0.1 0 0.92">
+      <!-- Shoulder joint - rotation around horizontal and vertical axes -->
+      <joint name="club_shoulder_x" type="hinge" pos="0 0 0" axis="1 0 0" range="-inf inf" damping="0.5"/>
+      <joint name="club_shoulder_y" type="hinge" pos="0 0 0" axis="0 1 0" range="-inf inf" damping="0.5"/>
+      <joint name="club_shoulder_z" type="hinge" pos="0 0 0" axis="0 0 1" range="-inf inf" damping="0.5"/>
+
+
+      <!-- Club shaft -->
+      <geom name="grip" type="cylinder" fromto="0 0 0 0 0 -0.2" size="0.015" rgba="0.1 0.1 0.1 1" mass="0.05"/>
+      <geom name="shaft" type="cylinder" fromto="0 0 -0.2 0 0 -0.9" size="0.006" rgba="0.3 0.3 0.3 1" mass="0.1"/>
+
+      <!-- Club head connection point -->
+      <body name="club_head_body" pos="0 0 -0.9">
+        <!-- Club head (simplified driver shape) -->
+        <geom name="club_face" type="box" pos="0 0.025 0" size="0.025 0.03 0.015" rgba="0.6 0.6 0.7 1" mass="0.15" friction="0.4 0.005 0.0001"/>
+        <geom name="club_back" type="box" pos="0 -0.015 0" size="0.02 0.01 0.012" rgba="0.5 0.5 0.6 1" mass="0.05"/>
+
+        <site name="club_face_site" pos="0 0.055 -0.045" size="0.001"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Velocity actuators for club control -->
+    <velocity name="shoulder_actuator_x" joint="club_shoulder_x" kv="10" ctrllimited="true" ctrlrange="-20 20"/>
+    <velocity name="shoulder_actuator_y" joint="club_shoulder_y" kv="10" ctrllimited="true" ctrlrange="-20 20"/>
+    <velocity name="shoulder_actuator_z" joint="club_shoulder_z" kv="10" ctrllimited="true" ctrlrange="-20 20"/>
+  </actuator>
+
+  <sensor>
+    <framepos name="ball_pos" objtype="site" objname="ball_site"/>
+    <framelinvel name="ball_vel" objtype="site" objname="ball_site"/>
+    <framepos name="club_face_pos" objtype="site" objname="club_face_site"/>
+  </sensor>
+
+</mujoco>
