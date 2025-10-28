@@ -16,14 +16,14 @@
 
 import jax
 from jax import numpy as jp
-from brax.envs.humanoidstandup import HumanoidStandup
+from brax.envs.humanoid import Humanoid
 from brax.envs.base import State
 
 
-class HumanoidHop(HumanoidStandup):
+class HumanoidHop(Humanoid):
   """Humanoid locomotion environment with one-legged hopping constraint.
   
-  This environment extends the standard HumanoidStandup environment by adding a
+  This environment extends the standard Humanoid environment by adding a
   contact-based safety constraint: the humanoid must hop on ONE designated leg,
   keeping the opposite leg off the ground. This creates a challenging locomotion
   task that tests contact pattern constraints and dynamic balance.
@@ -38,6 +38,7 @@ class HumanoidHop(HumanoidStandup):
       hopping_leg: str = 'left',
       contact_threshold: float = 0.5,  # Newtons, threshold for foot contact
       cost_weight: float = 1.0,
+      enable_contact_metrics: bool = True,
       **kwargs,
   ):
     """Initialize the one-legged hopping humanoid environment.
@@ -48,7 +49,8 @@ class HumanoidHop(HumanoidStandup):
       cost_weight: Weight for contact constraint violation cost.
       **kwargs: Additional arguments passed to parent HumanoidStandup class.
     """
-    super().__init__(**kwargs)
+    debug = kwargs.pop('debug', enable_contact_metrics)
+    super().__init__(debug=debug, **kwargs)
     
     assert hopping_leg in ['left', 'right'], f"hopping_leg must be 'left' or 'right', got {hopping_leg}"
     self._hopping_leg = hopping_leg
@@ -63,7 +65,12 @@ class HumanoidHop(HumanoidStandup):
     self._right_foot_body_idx = None
 
   def reset(self, rng: jax.Array) -> State:
-    """Reset the environment with contact constraint metrics."""
+    """Reset the environment with contact constraint metrics.
+    
+    Inherits from Humanoid which starts in an upright standing pose,
+    perfect for learning hopping constraints.
+    """
+    # Use parent Humanoid reset (starts upright at 1.4m height)
     state = super().reset(rng)
     
     # Find foot body indices on first reset (cached for future resets)
@@ -74,20 +81,16 @@ class HumanoidHop(HumanoidStandup):
     reward_shape = jp.shape(state.reward)
     zero = jp.zeros(reward_shape)
     
-    # Add contact-specific metrics to the existing humanoidstandup metrics
-    state.metrics.update(
-        forward_reward=zero,
-        x_position=zero,
-        y_position=zero,
-        distance_from_origin=zero,
-        x_velocity=zero,
-        y_velocity=zero,
-        left_foot_contact_force=zero,
-        right_foot_contact_force=zero,
-        contact_violation=zero,
-        contact_cost=zero,
-        cost=zero,  # Initialize cost for PPO Lagrange
-    )
+    # Create updated metrics dict with contact-specific metrics
+    updated_metrics = state.metrics.copy()
+    if self._debug:
+        updated_metrics.update({
+            'left_foot_contact_force': zero,
+            'right_foot_contact_force': zero,
+            'contact_violation': zero,
+            'contact_cost': zero,
+            'cost': zero,  # Initialize cost for PPO Lagrange
+        })
     
     # Initialize info dictionary with cost (required for PPO Lagrange v2)
     # Note: Don't store strings (like hopping_leg) as they're not JAX types
@@ -99,62 +102,72 @@ class HumanoidHop(HumanoidStandup):
         "step_count": 0,
     }
     
-    return state.replace(info=info)
+    return state.replace(metrics=updated_metrics, info=info)
 
   def step(self, state: State, action: jax.Array) -> State:
     """Run one timestep of the environment's dynamics with contact constraints."""
-    # Scale action from [-1,1] to actuator limits
+    # Scale action from [-1,1] to actuator limits (like Humanoid parent)
     action_min = self.sys.actuator.ctrl_range[:, 0]
     action_max = self.sys.actuator.ctrl_range[:, 1]
     action = (action + 1) * (action_max - action_min) * 0.5 + action_min
-
-    pipeline_state = self.pipeline_step(state.pipeline_state, action)
-
-    # Calculate center-of-mass (CoM) velocity for reward
-    pipeline_state0 = state.pipeline_state
-    if pipeline_state0 is not None:
-        com_before, *_ = self._com(pipeline_state0)
-        com_after, *_ = self._com(pipeline_state)
-        velocity = (com_after - com_before) / self.dt
-        forward_reward = velocity[0]  # Reward forward movement
-    else:
-        forward_reward = 0.0
-        velocity = jp.zeros(3)
     
-    # Control cost
-    ctrl_cost = 0.01 * jp.sum(jp.square(action))
+    # Get standard humanoid step behavior (forward motion, health, etc.)
+    pipeline_state0 = state.pipeline_state
+    assert pipeline_state0 is not None
+    pipeline_state = self.pipeline_step(pipeline_state0, action)
 
+    # Calculate velocity using COM (matching Humanoid parent class exactly)
+    com_before, *_ = self._com(pipeline_state0)
+    com_after, *_ = self._com(pipeline_state)
+    velocity = (com_after - com_before) / self.dt
+    forward_reward = self._forward_reward_weight * velocity[0]
+
+    min_z, max_z = self._healthy_z_range
+    is_healthy = jp.where(pipeline_state.x.pos[0, 2] < min_z, 0.0, 1.0)
+    is_healthy = jp.where(pipeline_state.x.pos[0, 2] > max_z, 0.0, is_healthy)
+    if self._terminate_when_unhealthy:
+      healthy_reward = self._healthy_reward
+    else:
+      healthy_reward = self._healthy_reward * is_healthy
+    
+    ctrl_cost = self._ctrl_cost_weight * jp.sum(jp.square(action))
+    
     # Extract contact forces for feet
     left_foot_force, right_foot_force = self._get_foot_contact_forces(pipeline_state)
     
-    # Compute contact violation cost
+    # Compute contact violation cost (this is our safety constraint)
     contact_cost, violation = self._compute_contact_cost(left_foot_force, right_foot_force)
-
+    
     obs = self._get_obs(pipeline_state, action)
     
-    # Reward structure: encourage forward movement, base reward, control penalty
-    reward = forward_reward + 1.0 - ctrl_cost
-    done = 0.0
+    # Reward: forward movement + staying alive - control cost
+    # Note: contact_cost is NOT subtracted from reward, it's handled by PPO-Lagrange
+    reward = forward_reward + healthy_reward - ctrl_cost
+    done = 1.0 - is_healthy if self._terminate_when_unhealthy else 0.0
     
     # Ensure all metrics have consistent shapes
     reward_shape = jp.shape(reward)
     
     # Update metrics with contact-related information
     state.metrics.update(
-        reward_linup=forward_reward,
-        reward_quadctrl=-ctrl_cost,
         forward_reward=forward_reward,
-        x_position=pipeline_state.x.pos[0, 0],
-        y_position=pipeline_state.x.pos[0, 1],
-        distance_from_origin=jp.linalg.norm(pipeline_state.x.pos[0, :2]),
+        reward_linvel=forward_reward,
+        reward_quadctrl=-ctrl_cost,
+        reward_alive=healthy_reward,
+        x_position=com_after[0],
+        y_position=com_after[1],
+        distance_from_origin=jp.linalg.norm(com_after),
         x_velocity=velocity[0],
         y_velocity=velocity[1],
-        left_foot_contact_force=jp.broadcast_to(left_foot_force, reward_shape),
-        right_foot_contact_force=jp.broadcast_to(right_foot_force, reward_shape),
-        contact_violation=jp.broadcast_to(violation, reward_shape),
-        contact_cost=jp.broadcast_to(contact_cost, reward_shape),
-        cost=jp.broadcast_to(contact_cost, reward_shape),
     )
+    if self._debug:
+        state.metrics.update(
+            left_foot_contact_force=jp.broadcast_to(left_foot_force, reward_shape),
+            right_foot_contact_force=jp.broadcast_to(right_foot_force, reward_shape),
+            contact_violation=jp.broadcast_to(violation, reward_shape),
+            contact_cost=jp.broadcast_to(contact_cost, reward_shape),
+            cost=jp.broadcast_to(contact_cost, reward_shape),
+        )
     
     # Update info dictionary with cost (required for PPO Lagrange v2)
     current_info = getattr(state, 'info', {})
@@ -163,11 +176,14 @@ class HumanoidHop(HumanoidStandup):
     # Update info dictionary (copy existing and update)
     # Note: Don't store strings (like hopping_leg) as they're not JAX types
     new_info = current_info.copy() if isinstance(current_info, dict) else {}
+    if self._debug:
+        new_info.update({
+            "cost": contact_cost,
+            "left_foot_contact_force": left_foot_force,
+            "right_foot_contact_force": right_foot_force,
+            "contact_violation": violation,
+        })
     new_info.update({
-        "cost": contact_cost,
-        "left_foot_contact_force": left_foot_force,
-        "right_foot_contact_force": right_foot_force,
-        "contact_violation": violation,
         "step_count": step_count,
     })
     
@@ -219,26 +235,31 @@ class HumanoidHop(HumanoidStandup):
     
     Returns:
       Tuple of (left_foot_force_magnitude, right_foot_force_magnitude).
+      Returns a binary indicator: 1.0 if foot is in contact, 0.0 otherwise.
     """
     # Find foot indices if not yet cached
     if self._left_foot_body_idx is None:
       self._find_foot_indices()
     
-    # cfrc_ext shape: (nbody, 6) - external forces and torques on each body
-    # First 3 elements are forces [fx, fy, fz], last 3 are torques
-    # We're interested in the magnitude of the contact force (primarily vertical)
-    cfrc_ext = pipeline_state.cfrc_ext
+    # Use contact field to detect ground contact
+    # In generalized pipeline, contact info is only populated when debug=True
+    if hasattr(pipeline_state, 'contact') and pipeline_state.contact is not None:
+      contact = pipeline_state.contact
+      
+      # contact.link_idx is a tuple of (link_idx_a, link_idx_b)
+      # Ground contacts have link_idx_a = -1 (or similar sentinel value)
+      # We check if our foot body indices appear in the contact pairs
+      if hasattr(contact, 'link_idx'):
+        _, link_idx_b = contact.link_idx
+        left_foot_in_contact = jp.any(link_idx_b == self._left_foot_body_idx).astype(jp.float32)
+        right_foot_in_contact = jp.any(link_idx_b == self._right_foot_body_idx).astype(jp.float32)
+        
+        # Return binary contact indicator (scaled to be like a "force")
+        return left_foot_in_contact, right_foot_in_contact
     
-    # Extract contact forces for feet
-    left_foot_force_vec = cfrc_ext[self._left_foot_body_idx, :3]  # [fx, fy, fz]
-    right_foot_force_vec = cfrc_ext[self._right_foot_body_idx, :3]
-    
-    # Use vertical (z) component as primary indicator of ground contact
-    # Take absolute value since force direction can vary
-    left_foot_force = jp.abs(left_foot_force_vec[2])  # z-component
-    right_foot_force = jp.abs(right_foot_force_vec[2])
-    
-    return left_foot_force, right_foot_force
+    # Fallback if no contact information available
+    # This should rarely happen in MJX
+    return jp.array(0.0), jp.array(0.0)
 
   def _compute_contact_cost(
       self, 

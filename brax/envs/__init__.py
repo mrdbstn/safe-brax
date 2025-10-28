@@ -25,6 +25,7 @@ from brax.envs import half_cheetah
 from brax.envs import hopper
 from brax.envs import humanoid
 from brax.envs import humanoid_height_constrained
+from brax.envs import humanoid_hop
 from brax.envs import humanoidstandup
 from brax.envs import inverted_double_pendulum
 from brax.envs import inverted_pendulum
@@ -47,6 +48,7 @@ _envs = {
     'hopper': hopper.Hopper,
     'humanoid': humanoid.Humanoid,
     'humanoid_height_constrained': humanoid_height_constrained.HumanoidHeightConstrained,
+    'humanoid_hop': humanoid_hop.HumanoidHop,
     'humanoidstandup': humanoidstandup.HumanoidStandup,
     'inverted_pendulum': inverted_pendulum.InvertedPendulum,
     'inverted_double_pendulum': inverted_double_pendulum.InvertedDoublePendulum,
