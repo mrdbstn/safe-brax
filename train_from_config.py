@@ -717,7 +717,7 @@ def record_episode_video(
         make_inference_fn,
         params,
         steps: int = 2500,
-        camera: str | int = 0,  # camera name or id
+        camera: str | int = 0,
         width: int = 320,
         height: int = 240,
         fps: int = 100,

@@ -33,7 +33,7 @@
     "ppo"
   ],
   "save_checkpoint_path": "/vast.mnt/home/20191873/safebrax/runs/humanoid_hop_experiments/checkpoints",
-  "camera": 0,
+  "camera": "track",
   "video_width": 640,
   "video_height": 480,
   "video_fps": 30

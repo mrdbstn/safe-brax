@@ -28,18 +28,19 @@ class HumanoidHop(Humanoid):
   keeping the opposite leg off the ground. This creates a challenging locomotion
   task that tests contact pattern constraints and dynamic balance.
   
-  The cost (constraint violation) is binary: 1.0 when the non-hopping foot
-  touches the ground, 0.0 otherwise. This tests safe RL algorithms' ability to
-  handle sparse, discontinuous constraint signals.
+  The cost (constraint violation) is continuous: the non-hopping foot incurs
+  cost proportional to contact force above a threshold. This encourages safe RL
+  algorithms to learn to minimize unwanted contacts.
   """
 
   def __init__(
       self,
       hopping_leg: str = 'left',
       contact_threshold: float = 0.5,  # Newtons, threshold for foot contact
-      cost_weight: float = 1.0,
-      enable_contact_metrics: bool = True,
-      **kwargs,
+    cost_weight: float = 1.0,
+    contact_scale: float | None = None,
+    enable_contact_metrics: bool = True,
+    **kwargs,
   ):
     """Initialize the one-legged hopping humanoid environment.
     
@@ -56,6 +57,7 @@ class HumanoidHop(Humanoid):
     self._hopping_leg = hopping_leg
     self._contact_threshold = contact_threshold
     self._cost_weight = cost_weight
+    self._contact_scale = contact_scale
     
     # Body indices for feet (will be set after sys is loaded)
     # In humanoidstandup.xml:
@@ -273,7 +275,7 @@ class HumanoidHop(Humanoid):
       right_foot_force: Contact force magnitude on right foot.
     
     Returns:
-      Tuple of (cost, binary_violation_flag).
+      Tuple of (cost, violation).
     """
     # Determine which foot should NOT touch the ground
     if self._hopping_leg == 'left':
@@ -282,12 +284,18 @@ class HumanoidHop(Humanoid):
     else:
       # Hopping on right, so left foot should NOT touch
       violation_force = left_foot_force
-    
-    # Binary violation: 1.0 if contact force exceeds threshold, 0.0 otherwise
-    violation = (violation_force > self._contact_threshold).astype(jp.float32)
-    
-    # Cost is weighted binary violation
+
+    # Continuous violation: optionally normalize force above threshold.
+    force_over_threshold = jp.maximum(0.0, violation_force - self._contact_threshold)
+    scale = self._contact_scale
+    if scale is None:
+      normalized = force_over_threshold
+    else:
+      normalized = force_over_threshold / jp.maximum(1e-6, scale)
+    violation = jp.clip(normalized, 0.0, 1.0)
+
+    # Cost is weighted continuous violation
     cost = self._cost_weight * violation
-    
+
     return cost, violation
 
