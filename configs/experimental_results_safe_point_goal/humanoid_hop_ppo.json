@@ -3,7 +3,7 @@
   "env_name": "humanoid_hop",
   "alg": "ppo",
   "out_dir": "runs/humanoid_hop_experiments",
-  "num_timesteps": 100000000,
+  "num_timesteps": 30000000,
   "episode_length": 2000,
   "num_envs": 2048,
   "unroll_length": 8,

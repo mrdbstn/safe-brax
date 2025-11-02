@@ -429,25 +429,52 @@ def collect_rollout_metrics(env_name: str, make_inference_fn, params,
 
     # Initialize data collection
     rollout_frames = []
+    
+    # Initialize environment-specific metrics
     rollout_metrics_data = {
-        'distance_to_goal': [],
-        'last_dist_goal': [],
         'reward': [],
-        'dist_reward': [],
-        'goal_reward': [],
-        'orientation_reward': [],
-        'ctrl_cost': [],
+        'cost': [],
         'x_position': [],
         'y_position': [],
-        'agent_pos_x': [],
-        'agent_pos_y': [],
-        'goal_pos_x': [],
-        'goal_pos_y': [],
         'x_velocity': [],
         'y_velocity': [],
-        'goals_reached_count': [],
-        'cost': []
     }
+    
+    # Add safe_point_goal specific metrics
+    if 'point_goal' in env_name.lower() or 'safe_point_goal' in env_name.lower():
+        rollout_metrics_data.update({
+            'distance_to_goal': [],
+            'last_dist_goal': [],
+            'dist_reward': [],
+            'goal_reward': [],
+            'orientation_reward': [],
+            'ctrl_cost': [],
+            'agent_pos_x': [],
+            'agent_pos_y': [],
+            'goal_pos_x': [],
+            'goal_pos_y': [],
+            'goals_reached_count': [],
+        })
+    # Add humanoid_hop specific metrics
+    elif 'humanoid_hop' in env_name.lower():
+        rollout_metrics_data.update({
+            'forward_reward': [],
+            'reward_linvel': [],
+            'reward_quadctrl': [],
+            'reward_alive': [],
+            'distance_from_origin': [],
+            'ctrl_cost': [],
+            'left_foot_contact_force': [],
+            'right_foot_contact_force': [],
+            'contact_violation': [],
+            'contact_cost': [],
+        })
+    # Fallback: add common metrics that might exist
+    else:
+        rollout_metrics_data.update({
+            'ctrl_cost': [],
+        })
+    
     actions = []
 
     # Initialize rollout
@@ -465,32 +492,53 @@ def collect_rollout_metrics(env_name: str, make_inference_fn, params,
         eval_state = jit_eval_step(eval_state, action)
         rollout_frames.append(eval_state.pipeline_state)
 
-        # Collect metrics from eval_state.metrics
-        rollout_metrics_data['distance_to_goal'].append(eval_state.metrics.get('distance_to_goal', np.nan))
+        # Collect common metrics
         rollout_metrics_data['reward'].append(eval_state.metrics.get('reward', np.nan))
-        rollout_metrics_data['cost'].append(eval_state.metrics.get('cost', np.nan))
-        rollout_metrics_data['dist_reward'].append(eval_state.metrics.get('dist_reward', np.nan))
-        rollout_metrics_data['goal_reward'].append(eval_state.metrics.get('goal_reward', np.nan))
-        rollout_metrics_data['orientation_reward'].append(eval_state.metrics.get('orientation_reward', np.nan))
-        rollout_metrics_data['ctrl_cost'].append(eval_state.metrics.get('ctrl_cost', np.nan))
+        rollout_metrics_data['cost'].append(eval_state.info.get('cost', eval_state.metrics.get('cost', np.nan)))
         rollout_metrics_data['x_position'].append(eval_state.metrics.get('x_position', np.nan))
         rollout_metrics_data['y_position'].append(eval_state.metrics.get('y_position', np.nan))
         rollout_metrics_data['x_velocity'].append(eval_state.metrics.get('x_velocity', np.nan))
         rollout_metrics_data['y_velocity'].append(eval_state.metrics.get('y_velocity', np.nan))
-        rollout_metrics_data['goals_reached_count'].append(eval_state.metrics.get('goals_reached_count', np.nan))
 
-        # Collect metrics from eval_state.info
-        rollout_metrics_data['last_dist_goal'].append(eval_state.info.get('last_dist_goal', np.nan))
-        current_agent_pos = eval_state.info.get('agent_pos', np.array([np.nan, np.nan, np.nan]))
-        current_goal_pos = eval_state.info.get('goal_pos', np.array([np.nan, np.nan, np.nan]))
-        rollout_metrics_data['agent_pos_x'].append(current_agent_pos[0])
-        rollout_metrics_data['agent_pos_y'].append(current_agent_pos[1])
-        rollout_metrics_data['goal_pos_x'].append(current_goal_pos[0])
-        rollout_metrics_data['goal_pos_y'].append(current_goal_pos[1])
+        # Collect environment-specific metrics
+        if 'point_goal' in env_name.lower() or 'safe_point_goal' in env_name.lower():
+            # safe_point_goal specific metrics
+            rollout_metrics_data['distance_to_goal'].append(eval_state.metrics.get('distance_to_goal', np.nan))
+            rollout_metrics_data['dist_reward'].append(eval_state.metrics.get('dist_reward', np.nan))
+            rollout_metrics_data['goal_reward'].append(eval_state.metrics.get('goal_reward', np.nan))
+            rollout_metrics_data['orientation_reward'].append(eval_state.metrics.get('orientation_reward', np.nan))
+            rollout_metrics_data['ctrl_cost'].append(eval_state.metrics.get('ctrl_cost', np.nan))
+            rollout_metrics_data['goals_reached_count'].append(eval_state.metrics.get('goals_reached_count', np.nan))
+            rollout_metrics_data['last_dist_goal'].append(eval_state.info.get('last_dist_goal', np.nan))
+            current_agent_pos = eval_state.info.get('agent_pos', np.array([np.nan, np.nan, np.nan]))
+            current_goal_pos = eval_state.info.get('goal_pos', np.array([np.nan, np.nan, np.nan]))
+            rollout_metrics_data['agent_pos_x'].append(current_agent_pos[0])
+            rollout_metrics_data['agent_pos_y'].append(current_agent_pos[1])
+            rollout_metrics_data['goal_pos_x'].append(current_goal_pos[0])
+            rollout_metrics_data['goal_pos_y'].append(current_goal_pos[1])
+        elif 'humanoid_hop' in env_name.lower():
+            # humanoid_hop specific metrics
+            rollout_metrics_data['forward_reward'].append(eval_state.metrics.get('forward_reward', np.nan))
+            rollout_metrics_data['reward_linvel'].append(eval_state.metrics.get('reward_linvel', np.nan))
+            rollout_metrics_data['reward_quadctrl'].append(eval_state.metrics.get('reward_quadctrl', np.nan))
+            rollout_metrics_data['reward_alive'].append(eval_state.metrics.get('reward_alive', np.nan))
+            rollout_metrics_data['distance_from_origin'].append(eval_state.metrics.get('distance_from_origin', np.nan))
+            rollout_metrics_data['ctrl_cost'].append(eval_state.metrics.get('reward_quadctrl', np.nan))
+            # Debug metrics (may not be available if debug=False)
+            rollout_metrics_data['left_foot_contact_force'].append(eval_state.metrics.get('left_foot_contact_force', np.nan))
+            rollout_metrics_data['right_foot_contact_force'].append(eval_state.metrics.get('right_foot_contact_force', np.nan))
+            rollout_metrics_data['contact_violation'].append(eval_state.metrics.get('contact_violation', np.nan))
+            rollout_metrics_data['contact_cost'].append(eval_state.metrics.get('contact_cost', np.nan))
+        else:
+            # Fallback: collect ctrl_cost if available
+            rollout_metrics_data['ctrl_cost'].append(eval_state.metrics.get('ctrl_cost', np.nan))
 
         if i % 100 == 0 or i == num_steps - 1:
-            print(
-                f"Rollout step {i + 1}/{num_steps} completed. Goals reached: {eval_state.metrics.get('goals_reached_count', 0)}")
+            if 'point_goal' in env_name.lower() or 'safe_point_goal' in env_name.lower():
+                print(
+                    f"Rollout step {i + 1}/{num_steps} completed. Goals reached: {eval_state.metrics.get('goals_reached_count', 0)}")
+            else:
+                print(f"Rollout step {i + 1}/{num_steps} completed.")
 
         if eval_state.done:
             print(f"Rollout terminated early at step {i + 1} due to done signal.")
@@ -597,34 +645,27 @@ def verify_ppoc_shaping(env_name: str, make_inference_fn, params,
 
 
 def create_rollout_plots(rollout_metrics_data: Dict[str, List], env_name: str) -> None:
-    """Create and save plots from rollout metrics."""
+    """Create and save plots from rollout metrics (environment-specific)."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     plot_dir = 'plots'
     os.makedirs(plot_dir, exist_ok=True)
     plot_path_base = f'{plot_dir}/{env_name}_rollout_{timestamp}'
 
-    num_steps = len(rollout_metrics_data['distance_to_goal'])
+    # Determine number of steps from common metrics
+    num_steps = len(rollout_metrics_data.get('reward', rollout_metrics_data.get('cost', [])))
+    if num_steps == 0:
+        print("Warning: No metrics data available for plotting.")
+        return
     time_steps = np.arange(num_steps)
 
     plt.style.use('seaborn-v0_8-darkgrid')
 
-    # Plot 1: Distance and Last Distance to Goal
+    # Common plots for all environments
+    # Plot 1: Cost Plot
     plt.figure(figsize=(12, 7))
-    plt.plot(time_steps, rollout_metrics_data['distance_to_goal'], label='Current Distance to Goal', linestyle='-')
-    plt.plot(time_steps, rollout_metrics_data['last_dist_goal'], label='Last Distance to Goal', linestyle='--')
-    plt.xlabel("Time Step")
-    plt.ylabel("Distance")
-    plt.title(f"{env_name} - Rollout: Goal Tracking")
-    plt.legend()
-    plt.tight_layout()
-    goal_tracking_plot_path = f'{plot_path_base}_goal_distances.png'
-    plt.savefig(goal_tracking_plot_path)
-    plt.close()
-    print(f"Goal tracking plot saved to: {goal_tracking_plot_path}")
-
-    # Plot 2: Cost Plot
-    plt.figure(figsize=(12, 7))
-    plt.plot(time_steps, rollout_metrics_data['cost'], label='Cost', linestyle='-')
+    cost_data = rollout_metrics_data.get('cost', [])
+    if cost_data and len(cost_data) > 0:
+        plt.plot(time_steps, cost_data, label='Cost', linestyle='-', color='red')
     plt.xlabel("Time Step")
     plt.ylabel("Cost")
     plt.title(f"{env_name} - Rollout: Cost")
@@ -635,81 +676,261 @@ def create_rollout_plots(rollout_metrics_data: Dict[str, List], env_name: str) -
     plt.close()
     print(f"Cost plot saved to: {cost_plot_path}")
 
-    # Plot 3: Cumulative Cost
-    cumulative_cost = np.cumsum(rollout_metrics_data['cost'])
-    plt.figure(figsize=(12, 7))
-    plt.plot(time_steps, cumulative_cost, label='Cumulative Cost', color='red')
-    plt.xlabel("Time Step")
-    plt.ylabel("Cumulative Cost")
-    plt.title(f"{env_name} - Rollout: Cumulative Cost Over Time")
-    plt.legend()
-    plt.tight_layout()
-    cumulative_cost_plot_path = f'{plot_path_base}_cumulative_cost.png'
-    plt.savefig(cumulative_cost_plot_path)
-    plt.close()
-    print(f"Cumulative cost plot saved to: {cumulative_cost_plot_path}")
-
-    # Plot 4: Reward Component Breakdown
-    plt.figure(figsize=(12, 7))
-    plt.plot(time_steps, rollout_metrics_data['dist_reward'], label='Distance Reward', alpha=0.7)
-    plt.plot(time_steps, rollout_metrics_data['goal_reward'], label='Goal Reward', alpha=0.7)
-    plt.plot(time_steps, rollout_metrics_data['orientation_reward'], label='Orientation Reward', alpha=0.7)
-    plt.plot(time_steps, -np.array(rollout_metrics_data['ctrl_cost']), label='Negative Control Cost', alpha=0.7)
-    plt.plot(time_steps, rollout_metrics_data['reward'], label='Total Reward', linestyle='--', color='black',
-             linewidth=2)
-    plt.xlabel("Time Step")
-    plt.ylabel("Reward Value")
-    plt.title(f"{env_name} - Rollout: Reward Component Breakdown")
-    plt.legend()
-    plt.tight_layout()
-    reward_breakdown_plot_path = f'{plot_path_base}_reward_breakdown.png'
-    plt.savefig(reward_breakdown_plot_path)
-    plt.close()
-    print(f"Reward breakdown plot saved to: {reward_breakdown_plot_path}")
-
-    # Plot 5: X-Y Trajectory
-    plt.figure(figsize=(10, 8))
-    valid_x = np.array(rollout_metrics_data['x_position'])
-    valid_y = np.array(rollout_metrics_data['y_position'])
-    goal_x_series = np.array(rollout_metrics_data['goal_pos_x'])
-    goal_y_series = np.array(rollout_metrics_data['goal_pos_y'])
-
-    # Filter out NaNs
-    valid_indices_agent = ~(np.isnan(valid_x) | np.isnan(valid_y))
-    valid_x_agent = valid_x[valid_indices_agent]
-    valid_y_agent = valid_y[valid_indices_agent]
-
-    valid_indices_goal = ~(np.isnan(goal_x_series) | np.isnan(goal_y_series))
-    valid_x_goal = goal_x_series[valid_indices_goal]
-    valid_y_goal = goal_y_series[valid_indices_goal]
-
-    if len(valid_x_agent) > 0 and len(valid_y_agent) > 0:
-        plt.plot(valid_x_agent, valid_y_agent, 'k-', alpha=0.7, label='Agent Path')
-        plt.scatter(valid_x_agent[0], valid_y_agent[0], c='green', s=100, label='Agent Start', zorder=5, marker='o')
-        plt.scatter(valid_x_agent[-1], valid_y_agent[-1], c='red', s=100, label='Agent End', zorder=5, marker='x')
-
-        if len(valid_x_goal) > 0 and len(valid_y_goal) > 0:
-            plt.scatter(valid_x_goal[0], valid_y_goal[0], c='blue', s=150, label='Initial Goal', zorder=4, marker='*')
-            if any(g_x != valid_x_goal[0] for g_x in valid_x_goal) or any(
-                    g_y != valid_y_goal[0] for g_y in valid_y_goal):
-                plt.plot(valid_x_goal, valid_y_goal, 'b--', alpha=0.5, label='Goal Path')
-                plt.scatter(valid_x_goal[-1], valid_y_goal[-1], c='purple', s=150, label='Final Goal', zorder=4,
-                            marker='*')
-
-        plt.xlabel("X Position")
-        plt.ylabel("Y Position")
-        plt.title(f"{env_name} - Rollout: X-Y Trajectory")
+    # Plot 2: Cumulative Cost
+    if cost_data and len(cost_data) > 0:
+        cumulative_cost = np.cumsum(np.nan_to_num(cost_data))
+        plt.figure(figsize=(12, 7))
+        plt.plot(time_steps, cumulative_cost, label='Cumulative Cost', color='red')
+        plt.xlabel("Time Step")
+        plt.ylabel("Cumulative Cost")
+        plt.title(f"{env_name} - Rollout: Cumulative Cost Over Time")
         plt.legend()
-        plt.axis('equal')
-        plt.grid(True)
-    else:
-        plt.text(0.5, 0.5, "No valid position data for trajectory plot", ha='center', va='center')
+        plt.tight_layout()
+        cumulative_cost_plot_path = f'{plot_path_base}_cumulative_cost.png'
+        plt.savefig(cumulative_cost_plot_path)
+        plt.close()
+        print(f"Cumulative cost plot saved to: {cumulative_cost_plot_path}")
 
-    plt.tight_layout()
-    trajectory_plot_path = f'{plot_path_base}_xy_trajectory.png'
-    plt.savefig(trajectory_plot_path)
-    plt.close()
-    print(f"X-Y trajectory plot saved to: {trajectory_plot_path}")
+    # Environment-specific plots
+    if 'point_goal' in env_name.lower() or 'safe_point_goal' in env_name.lower():
+        # safe_point_goal specific plots
+        # Plot 3: Distance and Last Distance to Goal
+        if 'distance_to_goal' in rollout_metrics_data:
+            plt.figure(figsize=(12, 7))
+            plt.plot(time_steps, rollout_metrics_data['distance_to_goal'], label='Current Distance to Goal', linestyle='-')
+            if 'last_dist_goal' in rollout_metrics_data:
+                plt.plot(time_steps, rollout_metrics_data['last_dist_goal'], label='Last Distance to Goal', linestyle='--')
+            plt.xlabel("Time Step")
+            plt.ylabel("Distance")
+            plt.title(f"{env_name} - Rollout: Goal Tracking")
+            plt.legend()
+            plt.tight_layout()
+            goal_tracking_plot_path = f'{plot_path_base}_goal_distances.png'
+            plt.savefig(goal_tracking_plot_path)
+            plt.close()
+            print(f"Goal tracking plot saved to: {goal_tracking_plot_path}")
+
+        # Plot 4: Reward Component Breakdown
+        plt.figure(figsize=(12, 7))
+        if 'dist_reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['dist_reward'], label='Distance Reward', alpha=0.7)
+        if 'goal_reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['goal_reward'], label='Goal Reward', alpha=0.7)
+        if 'orientation_reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['orientation_reward'], label='Orientation Reward', alpha=0.7)
+        if 'ctrl_cost' in rollout_metrics_data:
+            plt.plot(time_steps, -np.array(rollout_metrics_data['ctrl_cost']), label='Negative Control Cost', alpha=0.7)
+        if 'reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['reward'], label='Total Reward', linestyle='--', color='black',
+                     linewidth=2)
+        plt.xlabel("Time Step")
+        plt.ylabel("Reward Value")
+        plt.title(f"{env_name} - Rollout: Reward Component Breakdown")
+        plt.legend()
+        plt.tight_layout()
+        reward_breakdown_plot_path = f'{plot_path_base}_reward_breakdown.png'
+        plt.savefig(reward_breakdown_plot_path)
+        plt.close()
+        print(f"Reward breakdown plot saved to: {reward_breakdown_plot_path}")
+
+        # Plot 5: X-Y Trajectory with goals
+        plt.figure(figsize=(10, 8))
+        valid_x = np.array(rollout_metrics_data.get('x_position', []))
+        valid_y = np.array(rollout_metrics_data.get('y_position', []))
+        goal_x_series = np.array(rollout_metrics_data.get('goal_pos_x', []))
+        goal_y_series = np.array(rollout_metrics_data.get('goal_pos_y', []))
+
+        # Filter out NaNs
+        valid_indices_agent = ~(np.isnan(valid_x) | np.isnan(valid_y))
+        valid_x_agent = valid_x[valid_indices_agent]
+        valid_y_agent = valid_y[valid_indices_agent]
+
+        valid_indices_goal = ~(np.isnan(goal_x_series) | np.isnan(goal_y_series))
+        valid_x_goal = goal_x_series[valid_indices_goal]
+        valid_y_goal = goal_y_series[valid_indices_goal]
+
+        if len(valid_x_agent) > 0 and len(valid_y_agent) > 0:
+            plt.plot(valid_x_agent, valid_y_agent, 'k-', alpha=0.7, label='Agent Path')
+            plt.scatter(valid_x_agent[0], valid_y_agent[0], c='green', s=100, label='Agent Start', zorder=5, marker='o')
+            plt.scatter(valid_x_agent[-1], valid_y_agent[-1], c='red', s=100, label='Agent End', zorder=5, marker='x')
+
+            if len(valid_x_goal) > 0 and len(valid_y_goal) > 0:
+                plt.scatter(valid_x_goal[0], valid_y_goal[0], c='blue', s=150, label='Initial Goal', zorder=4, marker='*')
+                if any(g_x != valid_x_goal[0] for g_x in valid_x_goal) or any(
+                        g_y != valid_y_goal[0] for g_y in valid_y_goal):
+                    plt.plot(valid_x_goal, valid_y_goal, 'b--', alpha=0.5, label='Goal Path')
+                    plt.scatter(valid_x_goal[-1], valid_y_goal[-1], c='purple', s=150, label='Final Goal', zorder=4,
+                                marker='*')
+
+            plt.xlabel("X Position")
+            plt.ylabel("Y Position")
+            plt.title(f"{env_name} - Rollout: X-Y Trajectory")
+            plt.legend()
+            plt.axis('equal')
+            plt.grid(True)
+        else:
+            plt.text(0.5, 0.5, "No valid position data for trajectory plot", ha='center', va='center')
+
+        plt.tight_layout()
+        trajectory_plot_path = f'{plot_path_base}_xy_trajectory.png'
+        plt.savefig(trajectory_plot_path)
+        plt.close()
+        print(f"X-Y trajectory plot saved to: {trajectory_plot_path}")
+
+    elif 'humanoid_hop' in env_name.lower():
+        # humanoid_hop specific plots
+        # Plot 3: Reward Component Breakdown
+        plt.figure(figsize=(12, 7))
+        if 'forward_reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['forward_reward'], label='Forward Reward', alpha=0.7)
+        if 'reward_alive' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['reward_alive'], label='Alive Reward', alpha=0.7)
+        if 'reward_quadctrl' in rollout_metrics_data:
+            # reward_quadctrl is already -ctrl_cost, so plot it directly
+            plt.plot(time_steps, rollout_metrics_data['reward_quadctrl'], label='Control Cost (negative)', alpha=0.7)
+        elif 'ctrl_cost' in rollout_metrics_data:
+            ctrl_cost_data = np.array(rollout_metrics_data['ctrl_cost'])
+            plt.plot(time_steps, -np.abs(ctrl_cost_data), label='Negative Control Cost', alpha=0.7)
+        if 'reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['reward'], label='Total Reward', linestyle='--', color='black',
+                     linewidth=2)
+        plt.xlabel("Time Step")
+        plt.ylabel("Reward Value")
+        plt.title(f"{env_name} - Rollout: Reward Component Breakdown")
+        plt.legend()
+        plt.tight_layout()
+        reward_breakdown_plot_path = f'{plot_path_base}_reward_breakdown.png'
+        plt.savefig(reward_breakdown_plot_path)
+        plt.close()
+        print(f"Reward breakdown plot saved to: {reward_breakdown_plot_path}")
+
+        # Plot 4: Distance from Origin
+        if 'distance_from_origin' in rollout_metrics_data:
+            plt.figure(figsize=(12, 7))
+            plt.plot(time_steps, rollout_metrics_data['distance_from_origin'], label='Distance from Origin', linestyle='-')
+            plt.xlabel("Time Step")
+            plt.ylabel("Distance")
+            plt.title(f"{env_name} - Rollout: Distance from Origin")
+            plt.legend()
+            plt.tight_layout()
+            distance_plot_path = f'{plot_path_base}_distance_from_origin.png'
+            plt.savefig(distance_plot_path)
+            plt.close()
+            print(f"Distance from origin plot saved to: {distance_plot_path}")
+
+        # Plot 5: Foot Contact Forces
+        if 'left_foot_contact_force' in rollout_metrics_data and 'right_foot_contact_force' in rollout_metrics_data:
+            plt.figure(figsize=(12, 7))
+            left_foot_data = np.array(rollout_metrics_data['left_foot_contact_force'])
+            right_foot_data = np.array(rollout_metrics_data['right_foot_contact_force'])
+            # Filter out NaNs
+            valid_left = ~np.isnan(left_foot_data)
+            valid_right = ~np.isnan(right_foot_data)
+            if np.any(valid_left):
+                plt.plot(time_steps[valid_left], left_foot_data[valid_left], label='Left Foot Contact Force', alpha=0.7, color='blue')
+            if np.any(valid_right):
+                plt.plot(time_steps[valid_right], right_foot_data[valid_right], label='Right Foot Contact Force', alpha=0.7, color='orange')
+            plt.xlabel("Time Step")
+            plt.ylabel("Contact Force")
+            plt.title(f"{env_name} - Rollout: Foot Contact Forces")
+            plt.legend()
+            plt.tight_layout()
+            contact_plot_path = f'{plot_path_base}_foot_contact_forces.png'
+            plt.savefig(contact_plot_path)
+            plt.close()
+            print(f"Foot contact forces plot saved to: {contact_plot_path}")
+
+        # Plot 6: Contact Violation and Cost
+        if 'contact_violation' in rollout_metrics_data:
+            plt.figure(figsize=(12, 7))
+            violation_data = np.array(rollout_metrics_data['contact_violation'])
+            valid_violation = ~np.isnan(violation_data)
+            if np.any(valid_violation):
+                plt.plot(time_steps[valid_violation], violation_data[valid_violation], label='Contact Violation', alpha=0.7, color='red')
+            if 'contact_cost' in rollout_metrics_data:
+                cost_data = np.array(rollout_metrics_data['contact_cost'])
+                valid_cost = ~np.isnan(cost_data)
+                if np.any(valid_cost):
+                    plt.plot(time_steps[valid_cost], cost_data[valid_cost], label='Contact Cost', alpha=0.7, color='purple')
+            plt.xlabel("Time Step")
+            plt.ylabel("Violation / Cost")
+            plt.title(f"{env_name} - Rollout: Contact Violation and Cost")
+            plt.legend()
+            plt.tight_layout()
+            violation_plot_path = f'{plot_path_base}_contact_violation.png'
+            plt.savefig(violation_plot_path)
+            plt.close()
+            print(f"Contact violation plot saved to: {violation_plot_path}")
+
+        # Plot 7: X-Y Trajectory (without goals)
+        plt.figure(figsize=(10, 8))
+        valid_x = np.array(rollout_metrics_data.get('x_position', []))
+        valid_y = np.array(rollout_metrics_data.get('y_position', []))
+
+        # Filter out NaNs
+        valid_indices = ~(np.isnan(valid_x) | np.isnan(valid_y))
+        valid_x_agent = valid_x[valid_indices]
+        valid_y_agent = valid_y[valid_indices]
+
+        if len(valid_x_agent) > 0 and len(valid_y_agent) > 0:
+            plt.plot(valid_x_agent, valid_y_agent, 'k-', alpha=0.7, label='Agent Path')
+            plt.scatter(valid_x_agent[0], valid_y_agent[0], c='green', s=100, label='Agent Start', zorder=5, marker='o')
+            plt.scatter(valid_x_agent[-1], valid_y_agent[-1], c='red', s=100, label='Agent End', zorder=5, marker='x')
+            plt.xlabel("X Position")
+            plt.ylabel("Y Position")
+            plt.title(f"{env_name} - Rollout: X-Y Trajectory")
+            plt.legend()
+            plt.axis('equal')
+            plt.grid(True)
+        else:
+            plt.text(0.5, 0.5, "No valid position data for trajectory plot", ha='center', va='center')
+
+        plt.tight_layout()
+        trajectory_plot_path = f'{plot_path_base}_xy_trajectory.png'
+        plt.savefig(trajectory_plot_path)
+        plt.close()
+        print(f"X-Y trajectory plot saved to: {trajectory_plot_path}")
+
+    else:
+        # Generic fallback plots
+        # Plot 3: Reward
+        if 'reward' in rollout_metrics_data:
+            plt.figure(figsize=(12, 7))
+            plt.plot(time_steps, rollout_metrics_data['reward'], label='Reward', linestyle='-', color='green')
+            plt.xlabel("Time Step")
+            plt.ylabel("Reward")
+            plt.title(f"{env_name} - Rollout: Reward")
+            plt.legend()
+            plt.tight_layout()
+            reward_plot_path = f'{plot_path_base}_reward.png'
+            plt.savefig(reward_plot_path)
+            plt.close()
+            print(f"Reward plot saved to: {reward_plot_path}")
+
+        # Plot 4: X-Y Trajectory (generic)
+        if 'x_position' in rollout_metrics_data and 'y_position' in rollout_metrics_data:
+            plt.figure(figsize=(10, 8))
+            valid_x = np.array(rollout_metrics_data['x_position'])
+            valid_y = np.array(rollout_metrics_data['y_position'])
+            valid_indices = ~(np.isnan(valid_x) | np.isnan(valid_y))
+            valid_x_agent = valid_x[valid_indices]
+            valid_y_agent = valid_y[valid_indices]
+
+            if len(valid_x_agent) > 0 and len(valid_y_agent) > 0:
+                plt.plot(valid_x_agent, valid_y_agent, 'k-', alpha=0.7, label='Agent Path')
+                plt.scatter(valid_x_agent[0], valid_y_agent[0], c='green', s=100, label='Agent Start', zorder=5, marker='o')
+                plt.scatter(valid_x_agent[-1], valid_y_agent[-1], c='red', s=100, label='Agent End', zorder=5, marker='x')
+                plt.xlabel("X Position")
+                plt.ylabel("Y Position")
+                plt.title(f"{env_name} - Rollout: X-Y Trajectory")
+                plt.legend()
+                plt.axis('equal')
+                plt.grid(True)
+                plt.tight_layout()
+                trajectory_plot_path = f'{plot_path_base}_xy_trajectory.png'
+                plt.savefig(trajectory_plot_path)
+                plt.close()
+                print(f"X-Y trajectory plot saved to: {trajectory_plot_path}")
 
 
 def record_episode_video(

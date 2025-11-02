@@ -58,13 +58,17 @@ class HumanoidHop(Humanoid):
     self._contact_threshold = contact_threshold
     self._cost_weight = cost_weight
     self._contact_scale = contact_scale
+    self._debug = debug
     
-    # Body indices for feet (will be set after sys is loaded)
+    # Body indices for feet (initialize after sys is loaded)
     # In humanoidstandup.xml:
     # Body 0: torso (root)
     # We need to find indices for left_foot and right_foot bodies
     self._left_foot_body_idx = None
     self._right_foot_body_idx = None
+    
+    # Find foot indices now that sys is initialized
+    self._find_foot_indices()
 
   def reset(self, rng: jax.Array) -> State:
     """Reset the environment with contact constraint metrics.
@@ -74,10 +78,6 @@ class HumanoidHop(Humanoid):
     """
     # Use parent Humanoid reset (starts upright at 1.4m height)
     state = super().reset(rng)
-    
-    # Find foot body indices on first reset (cached for future resets)
-    if self._left_foot_body_idx is None:
-      self._find_foot_indices()
     
     # Initialize contact-related metrics with consistent shapes
     reward_shape = jp.shape(state.reward)
@@ -178,16 +178,17 @@ class HumanoidHop(Humanoid):
     # Update info dictionary (copy existing and update)
     # Note: Don't store strings (like hopping_leg) as they're not JAX types
     new_info = current_info.copy() if isinstance(current_info, dict) else {}
+    # ALWAYS update cost (required for PPO-Lagrange training)
+    new_info["cost"] = contact_cost
+    new_info["step_count"] = step_count
+    
+    # Add debug metrics if enabled
     if self._debug:
         new_info.update({
-            "cost": contact_cost,
             "left_foot_contact_force": left_foot_force,
             "right_foot_contact_force": right_foot_force,
             "contact_violation": violation,
         })
-    new_info.update({
-        "step_count": step_count,
-    })
     
     return state.replace(
         pipeline_state=pipeline_state, obs=obs, reward=reward, done=done, info=new_info
@@ -251,13 +252,21 @@ class HumanoidHop(Humanoid):
       # contact.link_idx is a tuple of (link_idx_a, link_idx_b)
       # Ground contacts have link_idx_a = -1 (or similar sentinel value)
       # We check if our foot body indices appear in the contact pairs
+      # Note: foot can be in either position (a or b) of the contact pair
       if hasattr(contact, 'link_idx'):
-        _, link_idx_b = contact.link_idx
-        left_foot_in_contact = jp.any(link_idx_b == self._left_foot_body_idx).astype(jp.float32)
-        right_foot_in_contact = jp.any(link_idx_b == self._right_foot_body_idx).astype(jp.float32)
-        
-        # Return binary contact indicator (scaled to be like a "force")
-        return left_foot_in_contact, right_foot_in_contact
+        link_idx_a, link_idx_b = contact.link_idx
+        if hasattr(contact, 'dist'):
+            # dist < 0 indicates actual penetration/contact; positive = separation
+            active_mask = contact.dist < 0.0
+        else:
+            # If distance not available, assume entries correspond to active contacts
+            active_mask = jp.ones_like(link_idx_a, dtype=bool)
+        active_mask = jp.asarray(active_mask)
+        left_mask = active_mask & ((link_idx_a == self._left_foot_body_idx) | (link_idx_b == self._left_foot_body_idx))
+        right_mask = active_mask & ((link_idx_a == self._right_foot_body_idx) | (link_idx_b == self._right_foot_body_idx))
+        left_foot_in_contact = jp.where(jp.any(left_mask), 1.0, 0.0)
+        right_foot_in_contact = jp.where(jp.any(right_mask), 1.0, 0.0)
+        return left_foot_in_contact.astype(jp.float32), right_foot_in_contact.astype(jp.float32)
     
     # Fallback if no contact information available
     # This should rarely happen in MJX
