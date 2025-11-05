@@ -32,12 +32,12 @@ def render_states(env, states):
     )
 
     # 3. Save as video
-    iio.imwrite("output.mp4", np.stack(frames), fps=100)
+    iio.imwrite("swimmer.mp4", np.stack(frames), fps=100)
 
 
 def _init_safe_goal():
     cfg = default_config()
-    cfg.base_agent_file_name = "ant.xml"
+    cfg.base_agent_file_name = "swimmer.xml"
     env = SafePointGoal(cfg)
     step_jit = jax.jit(env.step)
     reset_jit = jax.jit(env.reset)
