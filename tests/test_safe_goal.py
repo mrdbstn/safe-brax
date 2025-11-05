@@ -13,14 +13,16 @@ def run_random_episode(env, jit_step, jit_reset, steps: int = 100):
 
     states = [state]
     for i in range(steps):
-        state = jit_step(state, action)
+        key = jax.random.PRNGKey(i)
+        step_action = action*jax.random.uniform(key)
+        state = jit_step(state, step_action)
         states.append(state)
-        print("Step", i)
+        print("Step", i, "Actions", step_action)
 
     print(f"Finished episode")
     return states
 
-def render_states(env, states):
+def render_states(env, states, base_agent_name):
     # 2. Render the states
     pipeline_states = [s.pipeline_state for s in states]
 
@@ -32,12 +34,13 @@ def render_states(env, states):
     )
 
     # 3. Save as video
-    iio.imwrite("swimmer.mp4", np.stack(frames), fps=100)
+    path = "videos/" + base_agent_name + ".mp4"
+    iio.imwrite(path, np.stack(frames), fps=100)
+    print("Saved video ", path)
 
-
-def _init_safe_goal():
+def _init_safe_goal(base_agent_name="ant.xml"):
     cfg = default_config()
-    cfg.base_agent_file_name = "swimmer.xml"
+    cfg.base_agent_file_name = base_agent_name
     env = SafePointGoal(cfg)
     step_jit = jax.jit(env.step)
     reset_jit = jax.jit(env.reset)
@@ -45,6 +48,11 @@ def _init_safe_goal():
 
 
 if __name__ == '__main__':
-    env, step, reset = _init_safe_goal()
-    states = run_random_episode(env, step, reset, steps=300)
-    render_states(env, states)
+    names = ["ant.xml", "half_cheetah.xml", "hopper.xml",
+             "humanoid.xml", "humanoidstandup.xml", "point.xml",
+             "swimmer.xml", "walker2d.xml"]
+
+    for name in names:
+        env, step, reset = _init_safe_goal(base_agent_name=name)
+        states = run_random_episode(env, step, reset, steps=300)
+        render_states(env, states, name.split(".")[0])
