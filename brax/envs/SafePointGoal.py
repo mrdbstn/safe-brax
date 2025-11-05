@@ -90,7 +90,7 @@ def default_config() -> config_dict.ConfigDict:
             ],
         ),
 
-        base_agent_file_name="ant.xml", # Name of the agent from the assets folder
+        base_agent_file_name="point.xml", # Name of the agent from the assets folder
         # --- Debugging ---
         debug=False,  # Print extra diagnostics during setup/reset
     )

@@ -1,6 +1,6 @@
 import jax
 import numpy as np
-from brax.envs.SafePointGoal import SafePointGoal
+from brax.envs.SafePointGoal import SafePointGoal, default_config
 import imageio.v3 as iio
 
 
@@ -36,7 +36,9 @@ def render_states(env, states):
 
 
 def _init_safe_goal():
-    env = SafePointGoal()
+    cfg = default_config()
+    cfg.base_agent_file_name = "ant.xml"
+    env = SafePointGoal(cfg)
     step_jit = jax.jit(env.step)
     reset_jit = jax.jit(env.reset)
     return env, step_jit, reset_jit
@@ -44,8 +46,5 @@ def _init_safe_goal():
 
 if __name__ == '__main__':
     env, step, reset = _init_safe_goal()
-    states = run_random_episode(env, step, reset)
+    states = run_random_episode(env, step, reset, steps=300)
     render_states(env, states)
-
-    from brax.envs.env_utils import get_action_dimensions
-    print(get_action_dimensions("brax/envs/assets/hopper.xml"))
