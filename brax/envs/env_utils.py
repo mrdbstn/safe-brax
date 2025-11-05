@@ -9,8 +9,13 @@ from brax.envs.builder import XMLBuilder
 from brax.envs.goals import GoalManager
 from brax.envs.hazards import HazardManager
 
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Union
+
 
 # -------------------------------- World building --------------------------------
+
 
 def create_hazard_manager_from_config(hazards_cfg) -> HazardManager:
     """Create a HazardManager from new nested config.
@@ -19,16 +24,18 @@ def create_hazard_manager_from_config(hazards_cfg) -> HazardManager:
       - specs: list of dicts {type, count, size, height, collidable}
     """
     manager = HazardManager()
-    specs = list(hazards_cfg.specs) if hazards_cfg and hasattr(hazards_cfg, 'specs') else []
+    specs = (
+        list(hazards_cfg.specs) if hazards_cfg and hasattr(hazards_cfg, "specs") else []
+    )
     for spec in specs:
         manager.add_hazards(
-            hazard_type=spec.get('type', 'cube'),
-            count=spec.get('count', 0),
-            size=spec.get('size', None),
-            height=spec.get('height', None),
-            collidable=spec.get('collidable', True),
-            movable=spec.get('movable', False),
-            density=spec.get('density', None),
+            hazard_type=spec.get("type", "cube"),
+            count=spec.get("count", 0),
+            size=spec.get("size", None),
+            height=spec.get("height", None),
+            collidable=spec.get("collidable", True),
+            movable=spec.get("movable", False),
+            density=spec.get("density", None),
         )
     return manager
 
@@ -42,12 +49,21 @@ def create_goal_manager_from_config(goals_cfg) -> GoalManager:
     """
     manager = GoalManager()
     g = goals_cfg
-    manager.add_goals(goal_type=g.type, count=g.count, positions=g.positions, size=g.size, height=g.height)
+    manager.add_goals(
+        goal_type=g.type,
+        count=g.count,
+        positions=g.positions,
+        size=g.size,
+        height=g.height,
+    )
     return manager
 
 
-def generate_point_goal_xml(goal_manager: GoalManager, hazard_manager: HazardManager,
-                            env_name="point_goal_hazard") -> str:
+def generate_point_goal_xml(
+    goal_manager: GoalManager,
+    hazard_manager: HazardManager,
+    env_name="point_goal_hazard",
+) -> str:
     """Generate XML file content with the specified goals and hazards.
 
     Args:
@@ -59,16 +75,49 @@ def generate_point_goal_xml(goal_manager: GoalManager, hazard_manager: HazardMan
     """
     # Construct absolute path to point.xml
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_xml_path = os.path.join(current_dir, 'assets', 'point.xml')
+    base_xml_path = os.path.join(current_dir, "assets", "point.xml")
 
+    return _create_temporary_file_and_return_path(base_xml_path, goal_manager, hazard_manager, env_name)
+
+
+def generate_goal_xml_from_base(
+    base_xml_name: str,
+    goal_manager: GoalManager,
+    hazard_manager: HazardManager,
+    env_name="goal_hazard",
+) -> str:
+    """Generate XML file content with the specified goals and hazards.
+
+    Args:
+        base_xml_name: Name of the base XML file in the 'assets' folder
+        goal_manager: GoalManager containing the goals
+        hazard_manager: HazardManager containing the hazards
+        env_name: Name of the environment
+
+    Returns:
+        Path to the generated temporary XML file
+    """
+    # Construct absolute path to point.xml
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_xml_path = os.path.join(current_dir, "assets", base_xml_name)
+
+    return _create_temporary_file_and_return_path(base_xml_path, goal_manager, hazard_manager, env_name)
+
+
+def _create_temporary_file_and_return_path(
+    base_xml_path: str,
+    goal_manager: GoalManager,
+    hazard_manager: HazardManager,
+    env_name="goal_hazard",
+):
     # Use XMLBuilder to generate complete XML
     builder = XMLBuilder(env_name)
     xml_content = builder.build_xml(base_xml_path, goal_manager, hazard_manager)
 
     # Create temporary file
-    temp_fd, temp_path = tempfile.mkstemp(suffix='.xml', prefix='safe_point_goal_')
+    temp_fd, temp_path = tempfile.mkstemp(suffix=".xml", prefix="safe_point_goal_")
     try:
-        with os.fdopen(temp_fd, 'w') as f:
+        with os.fdopen(temp_fd, "w") as f:
             f.write(xml_content)
     except:
         os.close(temp_fd)
@@ -77,7 +126,65 @@ def generate_point_goal_xml(goal_manager: GoalManager, hazard_manager: HazardMan
     return temp_path
 
 
+def get_action_dimensions(xml_path: Union[str, Path]) -> int:
+    """
+    Parse a MuJoCo XML file and return the number of action dimensions.
+
+    The action dimension is determined by counting the number of actuators
+    in the <actuator> section. Each actuator (motor, velocity, position, etc.)
+    corresponds to one action dimension.
+
+    Args:
+        xml_path: Path to the MuJoCo XML file (string or Path object)
+
+    Returns:
+        int: Number of action dimensions (number of actuators)
+
+    Raises:
+        FileNotFoundError: If the XML file doesn't exist
+        ET.ParseError: If the XML is malformed
+
+    Example:
+        >>> get_action_dimensions("point.xml")
+        2
+        >>> get_action_dimensions("ant.xml")
+        8
+    """
+    # Convert to Path object for better path handling
+    xml_path = Path(xml_path)
+
+    if not xml_path.exists():
+        raise FileNotFoundError(f"XML file not found: {xml_path}")
+
+    # Parse the XML file
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    # Find the <actuator> section
+    actuator_section = root.find('actuator')
+
+    # If no actuator section exists, return 0
+    if actuator_section is None:
+        return 0
+
+    # Count all actuator elements (motor, velocity, position, etc.)
+    # Different actuator types in MuJoCo:
+    # - motor: general actuator
+    # - velocity: velocity servo
+    # - position: position servo
+    # - cylinder: pneumatic cylinder
+    # - muscle: muscle actuator
+    actuator_types = ['motor', 'velocity', 'position', 'cylinder', 'muscle']
+
+    total_actuators = 0
+    for actuator_type in actuator_types:
+        actuators = actuator_section.findall(actuator_type)
+        total_actuators += len(actuators)
+
+    return total_actuators
+
 # -------------------------------- Config overwriting --------------------------------
+
 
 def shallow_merge(base: config_dict.ConfigDict, over: config_dict.ConfigDict | None):
     if over is None:
@@ -106,6 +213,7 @@ def expand_hazard_specs(cfg: config_dict.ConfigDict):
 
 
 # -------------------------------- Per-goal signed distance helpers (2D) --------------------------------
+
 
 def sdf_cylinder(agent_xy, center_xy, radius):
     """
@@ -151,9 +259,11 @@ def sdf_cube(agent_xy, center_xy, half_sizes_xy, yaw=0.0):
 
 # -------------------------------- Object placement --------------------------------
 
-def sample_candidate_positions(rng_key: jp.ndarray, num_candidates: int, keepout: float,
-                               placement_extents) -> jp.ndarray:
-    """ Sample many candidates within extents"""
+
+def sample_candidate_positions(
+    rng_key: jp.ndarray, num_candidates: int, keepout: float, placement_extents
+) -> jp.ndarray:
+    """Sample many candidates within extents"""
     min_x, min_y, max_x, max_y = placement_extents
     min_x = min_x + keepout
     min_y = min_y + keepout
@@ -166,7 +276,9 @@ def sample_candidate_positions(rng_key: jp.ndarray, num_candidates: int, keepout
     return jp.stack([xs, ys, zs], axis=1)
 
 
-def sample_position_in_extents(rng_key: jp.ndarray, placement_extents, keepout: float = 0.0) -> jp.ndarray:
+def sample_position_in_extents(
+    rng_key: jp.ndarray, placement_extents, keepout: float = 0.0
+) -> jp.ndarray:
     """Sample a position within the constrained placement extents."""
     min_x, min_y, max_x, max_y = placement_extents
 
@@ -185,14 +297,14 @@ def sample_position_in_extents(rng_key: jp.ndarray, placement_extents, keepout: 
 
 
 def choose_valid_position(
-        rng_key: jp.ndarray,
-        existing_positions_xy: jp.ndarray,
-        existing_keepouts: jp.ndarray,
-        active_count: jp.ndarray,
-        candidate_keepout: float,
-        num_candidates: int,
-        placement_extents: tuple[float, float, float, float],
-        placement_margin: float,
+    rng_key: jp.ndarray,
+    existing_positions_xy: jp.ndarray,
+    existing_keepouts: jp.ndarray,
+    active_count: jp.ndarray,
+    candidate_keepout: float,
+    num_candidates: int,
+    placement_extents: tuple[float, float, float, float],
+    placement_margin: float,
 ) -> tuple[jp.ndarray, jp.ndarray]:
     """
     Pick a valid (x, y, z) position for a new object given already-placed objects
@@ -227,20 +339,24 @@ def choose_valid_position(
           by exactly the missing clearance plus a tiny epsilon, then clip to extents.
     """
     # Sample K candidates uniformly inside extents minus candidate keepout.
-    candidates = sample_candidate_positions(rng_key, num_candidates, candidate_keepout, placement_extents)
+    candidates = sample_candidate_positions(
+        rng_key, num_candidates, candidate_keepout, placement_extents
+    )
     candidate_xy = candidates[:, :2]  # (K, 2)
 
     # Active mask for first `active_count` entries
     total_slots = existing_positions_xy.shape[0]
     indices_row = jp.arange(total_slots)[None, :]  # (1, N)
-    active_mask = (indices_row < active_count)  # (1, N), broadcast over K
+    active_mask = indices_row < active_count  # (1, N), broadcast over K
 
     # Pairwise distances candidate k to existing j: (K, N)
     deltas = candidate_xy[:, None, :] - existing_positions_xy[None, :, :]
     distances = jp.sqrt(jp.sum(jp.square(deltas), axis=-1) + 1e-8)
 
     # Required separation per neighbor j for this candidate
-    required = existing_keepouts[None, :] + candidate_keepout + placement_margin  # (1, N)
+    required = (
+        existing_keepouts[None, :] + candidate_keepout + placement_margin
+    )  # (1, N)
 
     # Slack: positive means candidate meets clearance against that neighbor
     slack = distances - required  # (K, N)
@@ -254,7 +370,7 @@ def choose_valid_position(
     best_candidate_xy = best_candidate[:2]
 
     # Valid if the best candidate’s worst slack is nonnegative
-    is_valid = (worst_slack_per_candidate[best_index] >= 0.0)
+    is_valid = worst_slack_per_candidate[best_index] >= 0.0
 
     def _accept(pos_xyz):
         return pos_xyz
@@ -262,7 +378,9 @@ def choose_valid_position(
     def _nudge(pos_xyz):
         # Move away from nearest active neighbor just enough to satisfy clearance
         distances_best = distances[best_index]  # (N,)
-        distances_best = jp.where(active_mask[0], distances_best, jp.full_like(distances_best, 1e9))
+        distances_best = jp.where(
+            active_mask[0], distances_best, jp.full_like(distances_best, 1e9)
+        )
         nearest_j = jp.argmin(distances_best)
 
         required_sep = required[0, nearest_j]
@@ -278,10 +396,16 @@ def choose_valid_position(
 
         # Clip to extents minus own keepout
         min_x, min_y, max_x, max_y = placement_extents
-        nudged_xy = jp.array([
-            jp.clip(nudged_xy[0], min_x + candidate_keepout, max_x - candidate_keepout),
-            jp.clip(nudged_xy[1], min_y + candidate_keepout, max_y - candidate_keepout),
-        ])
+        nudged_xy = jp.array(
+            [
+                jp.clip(
+                    nudged_xy[0], min_x + candidate_keepout, max_x - candidate_keepout
+                ),
+                jp.clip(
+                    nudged_xy[1], min_y + candidate_keepout, max_y - candidate_keepout
+                ),
+            ]
+        )
 
         return jp.array([nudged_xy[0], nudged_xy[1], pos_xyz[2]])
 
@@ -292,9 +416,17 @@ def choose_valid_position(
     return chosen_position, rng_key
 
 
-def place_objects(rng_key: jp.ndarray, positions_xy: jp.ndarray, keepouts_array: jp.ndarray, placed_count: jp.ndarray,
-                  per_item_keepouts: jp.ndarray, num_items: int, num_candidates: int, placement_extents,
-                  placement_margin: float):
+def place_objects(
+    rng_key: jp.ndarray,
+    positions_xy: jp.ndarray,
+    keepouts_array: jp.ndarray,
+    placed_count: jp.ndarray,
+    per_item_keepouts: jp.ndarray,
+    num_items: int,
+    num_candidates: int,
+    placement_extents,
+    placement_margin: float,
+):
     """
     Place `num_items` objects using per-item keepout radii, updating
     positions_xy and keepouts_array in-place, and returning the new positions.
@@ -335,15 +467,18 @@ def place_objects(rng_key: jp.ndarray, positions_xy: jp.ndarray, keepouts_array:
 
         return (rng_key_i, positions_xy_i, keepouts_array_i, placed_count_i), position_i
 
-    (rng_key, positions_xy, keepouts_array, placed_count), placed_positions = jax.lax.scan(
-        place_one,
-        (rng_key, positions_xy, keepouts_array, placed_count),
-        xs=jp.arange(num_items),
+    (rng_key, positions_xy, keepouts_array, placed_count), placed_positions = (
+        jax.lax.scan(
+            place_one,
+            (rng_key, positions_xy, keepouts_array, placed_count),
+            xs=jp.arange(num_items),
+        )
     )
     return rng_key, positions_xy, keepouts_array, placed_count, placed_positions
 
 
 # -------------------------------- Math --------------------------------
+
 
 def safe_norm(x, axis=None, keepdims=False, eps=1e-8):
     """Safely compute the norm with a small epsilon to avoid NaN."""
