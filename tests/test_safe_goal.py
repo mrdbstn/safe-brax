@@ -6,7 +6,7 @@ import imageio.v3 as iio
 
 def run_random_episode(step, reset, steps: int = 100):
     seed = jax.random.PRNGKey(4242)
-    action = jax.numpy.ones(2)
+    action = jax.numpy.ones(8)
     state = reset(seed)
 
     print(f"Starting episode")
@@ -46,3 +46,6 @@ if __name__ == '__main__':
     env, step, reset = _init_safe_goal()
     states = run_random_episode(step, reset)
     render_states(env, states)
+
+    from brax.envs.env_utils import get_action_dimensions
+    print(get_action_dimensions("brax/envs/assets/hopper.xml"))

@@ -151,7 +151,7 @@ class SafePointGoal(PipelineEnv):
         self._goal_yaws = jp.array([p.yaw for p in packed], dtype=jp.float32)
 
         # Generate XML dynamically with the configured goals and hazards
-        xml_path = generate_goal_xml_from_base("point.xml", self._goal_manager, self._hazard_manager)
+        xml_path = generate_goal_xml_from_base("ant.xml", self._goal_manager, self._hazard_manager)
 
         try:
             mj_model = mujoco.MjModel.from_xml_path(xml_path)

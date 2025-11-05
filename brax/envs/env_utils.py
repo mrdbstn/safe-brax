@@ -9,6 +9,10 @@ from brax.envs.builder import XMLBuilder
 from brax.envs.goals import GoalManager
 from brax.envs.hazards import HazardManager
 
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Union
+
 
 # -------------------------------- World building --------------------------------
 
@@ -121,6 +125,63 @@ def _create_temporary_file_and_return_path(
 
     return temp_path
 
+
+def get_action_dimensions(xml_path: Union[str, Path]) -> int:
+    """
+    Parse a MuJoCo XML file and return the number of action dimensions.
+
+    The action dimension is determined by counting the number of actuators
+    in the <actuator> section. Each actuator (motor, velocity, position, etc.)
+    corresponds to one action dimension.
+
+    Args:
+        xml_path: Path to the MuJoCo XML file (string or Path object)
+
+    Returns:
+        int: Number of action dimensions (number of actuators)
+
+    Raises:
+        FileNotFoundError: If the XML file doesn't exist
+        ET.ParseError: If the XML is malformed
+
+    Example:
+        >>> get_action_dimensions("point.xml")
+        2
+        >>> get_action_dimensions("ant.xml")
+        8
+    """
+    # Convert to Path object for better path handling
+    xml_path = Path(xml_path)
+
+    if not xml_path.exists():
+        raise FileNotFoundError(f"XML file not found: {xml_path}")
+
+    # Parse the XML file
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    # Find the <actuator> section
+    actuator_section = root.find('actuator')
+
+    # If no actuator section exists, return 0
+    if actuator_section is None:
+        return 0
+
+    # Count all actuator elements (motor, velocity, position, etc.)
+    # Different actuator types in MuJoCo:
+    # - motor: general actuator
+    # - velocity: velocity servo
+    # - position: position servo
+    # - cylinder: pneumatic cylinder
+    # - muscle: muscle actuator
+    actuator_types = ['motor', 'velocity', 'position', 'cylinder', 'muscle']
+
+    total_actuators = 0
+    for actuator_type in actuator_types:
+        actuators = actuator_section.findall(actuator_type)
+        total_actuators += len(actuators)
+
+    return total_actuators
 
 # -------------------------------- Config overwriting --------------------------------
 
