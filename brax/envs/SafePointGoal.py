@@ -59,7 +59,7 @@ def default_config() -> config_dict.ConfigDict:
         placement=config_dict.create(
             extents=(-2.5, -2.5, 2.5, 2.5),  # [min_x, min_y, max_x, max_y]
             agent_keepout=0.1,  # Keepout radius around agent
-            margin=0.05,  # Additional spacing margin for placement
+            margin=0.01,  # Additional spacing margin for placement
             attempts_pos=100,  # Max attempts to place a single object
             attempts_layout=1000,  # Max attempts to build a full valid layout
         ),
@@ -374,7 +374,6 @@ class SafePointGoal(PipelineEnv):
 
     def step(self, state: State, action: jp.ndarray) -> State:
         """Execute one step in the environment."""
-        last_dist_goal = state.info['last_dist_goal']
 
         data0 = state.pipeline_state
         data = self.pipeline_step(data0, action)
@@ -383,8 +382,9 @@ class SafePointGoal(PipelineEnv):
         agent_pos = data.xpos[self._agent_body]
         hazard_positions = state.info['hazard_positions']
         goal_positions = state.info['goal_positions']
+        last_dist_goal = state.info['last_dist_goal']
 
-        # ============================== GOAL REWARD CALCULATION ==============================
+        # ============================== GOAL REWARDS ==============================
 
         # Distances to all goals (XY)
         agent_xy = agent_pos[:2]
@@ -393,9 +393,12 @@ class SafePointGoal(PipelineEnv):
         is_cube = (self._goal_type_ids == 0)  # TODO extend for more types
 
         # vectorized SDFs
-        sdf_cube_2d = jax.vmap(lambda c, he, y: sdf_cube(agent_xy, c, he, y))(goals_xy, self._goal_box_he,
-                                                                              self._goal_yaws)
-        sdf_cylinder_2d = jax.vmap(lambda c, r: sdf_cylinder(agent_xy, c, r))(goals_xy, self._goal_radii)
+        sdf_cube_2d = jax.vmap(lambda c, he, y: sdf_cube(agent_xy, c, he, y))(
+            goals_xy, self._goal_box_he, self._goal_yaws
+        )
+        sdf_cylinder_2d = jax.vmap(lambda c, r: sdf_cylinder(agent_xy, c, r))(
+            goals_xy, self._goal_radii
+        )
 
         # pick per-type
         sdf = jp.where(is_cube, sdf_cube_2d, sdf_cylinder_2d)
@@ -410,11 +413,10 @@ class SafePointGoal(PipelineEnv):
         dist_reward = (last_dist_goal - dist_goal) * self._reward_distance
         goal_reward = self._reward_goal * num_goals_reached
 
-        # ============================== GOAL RESPAWN LOGIC ==============================
+        # ============================== GOAL RESPAWN ==============================
 
         # Build object arrays used during goal respawn checks:
         # we treat the agent, all hazards, and all goals as objects with per-object keepouts.
-        agent_xy = data.xpos[self._agent_body][:2]
         hazard_positions_xy = hazard_positions[:, :2]
         goal_positions_xy = goal_positions[:, :2]
 
@@ -492,10 +494,7 @@ class SafePointGoal(PipelineEnv):
 
         # Compute new positions for all goals (only those reached will move)
         new_goal_positions = jp.zeros_like(goal_positions)
-        (rng_for_goal_respawn,
-         object_positions_xy,
-         object_keepouts,
-         new_goal_positions) = jax.lax.fori_loop(
+        (rng_for_goal_respawn, object_positions_xy, object_keepouts, new_goal_positions) = jax.lax.fori_loop(
             0,
             self._num_goals,
             lambda i, carry: _place_or_keep_goal(carry, i),
@@ -603,7 +602,7 @@ class SafePointGoal(PipelineEnv):
         total = jp.array(0.0)
         # Unrolled small loop; JAX traces a static graph here
         for i, h in enumerate(self._hazard_manager.hazards):
-            hz_xy = hazard_positions[i, :2] if hazard_positions.shape[0] > i else jp.array([0.0, 0.0])
+            hz_xy = hazard_positions[i, :2]
             total = total + h.calculate_cost(
                 agent_xy=agent_xy,
                 hazard_xy=hz_xy,
