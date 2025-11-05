@@ -19,7 +19,7 @@ def test_record_video_mixed_hazards():
     cfg.placement.extents = (-2.0, -2.0, 2.0, 2.0)
     cfg.goals.type = 'cylinder'
     cfg.goals.count = 2
-    cfg.goals.size = 0.1
+    cfg.goals.size = 0.2
     cfg.goals.height = 0.2
     cfg.hazards.specs = [
         # 1) 3 cube hazards, size 0.3, height 0.3, non-collidable

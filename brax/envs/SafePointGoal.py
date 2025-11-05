@@ -942,7 +942,7 @@ def SafePointGoal_MixedHazards():
     config = default_config()
     config.goals.type = 'cylinder'
     config.goals.count = 2
-    config.goals.size = 0.1
+    config.goals.size = 0.2
     config.goals.height = 0.2
     config.hazards.specs = [
         {"type": "cube", "count": 3, "size": 0.3, "height": 0.3, "collidable": False},
