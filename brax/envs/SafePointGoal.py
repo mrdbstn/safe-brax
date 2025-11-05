@@ -16,7 +16,7 @@ from mujoco import mjx
 
 from brax.envs.base import PipelineEnv, State
 from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
-    generate_point_goal_xml, safe_norm, shallow_merge, expand_hazard_specs, choose_valid_position, \
+    generate_goal_xml_from_base, safe_norm, shallow_merge, expand_hazard_specs, choose_valid_position, \
     sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents
 from brax.envs.hazards import _type_defaults_from_registry
 from brax.io import mjcf
@@ -151,7 +151,7 @@ class SafePointGoal(PipelineEnv):
         self._goal_yaws = jp.array([p.yaw for p in packed], dtype=jp.float32)
 
         # Generate XML dynamically with the configured goals and hazards
-        xml_path = generate_point_goal_xml(self._goal_manager, self._hazard_manager)
+        xml_path = generate_goal_xml_from_base("point.xml", self._goal_manager, self._hazard_manager)
 
         try:
             mj_model = mujoco.MjModel.from_xml_path(xml_path)
