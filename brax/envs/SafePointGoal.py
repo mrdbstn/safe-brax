@@ -17,7 +17,7 @@ from mujoco import mjx
 from brax.envs.base import PipelineEnv, State
 from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
     generate_goal_xml_from_base, safe_norm, shallow_merge, expand_hazard_specs, choose_valid_position, \
-    sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents
+    sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents, get_action_dimensions, base_xml_file_path
 from brax.envs.hazards import _type_defaults_from_registry
 from brax.io import mjcf
 
@@ -90,6 +90,7 @@ def default_config() -> config_dict.ConfigDict:
             ],
         ),
 
+        base_agent_file_name="ant.xml", # Name of the agent from the assets folder
         # --- Debugging ---
         debug=False,  # Print extra diagnostics during setup/reset
     )
@@ -151,7 +152,9 @@ class SafePointGoal(PipelineEnv):
         self._goal_yaws = jp.array([p.yaw for p in packed], dtype=jp.float32)
 
         # Generate XML dynamically with the configured goals and hazards
-        xml_path = generate_goal_xml_from_base("ant.xml", self._goal_manager, self._hazard_manager)
+        base_file_name = config.base_agent_file_name
+        xml_path = generate_goal_xml_from_base(base_file_name, self._goal_manager, self._hazard_manager)
+        self._xml_base_file_path = base_xml_file_path(base_file_name)
 
         try:
             mj_model = mujoco.MjModel.from_xml_path(xml_path)
@@ -901,6 +904,11 @@ class SafePointGoal(PipelineEnv):
                 2 +  # Goal compass
                 self._num_hazards * 2  # Hazard compasses
         )
+
+    @property
+    def action_size(self) -> int:
+        """Returns the size of the action vector."""
+        return get_action_dimensions(self._xml_base_file_path)
 
 
 def SafePointGoal_8Cubes():

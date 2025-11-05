@@ -97,12 +97,16 @@ def generate_goal_xml_from_base(
     Returns:
         Path to the generated temporary XML file
     """
-    # Construct absolute path to point.xml
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_xml_path = os.path.join(current_dir, "assets", base_xml_name)
+    return _create_temporary_file_and_return_path(
+        base_xml_file_path(base_xml_name),
+        goal_manager,
+        hazard_manager,
+        env_name
+    )
 
-    return _create_temporary_file_and_return_path(base_xml_path, goal_manager, hazard_manager, env_name)
 
+def base_xml_file_path(base_xml_name: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", base_xml_name)
 
 def _create_temporary_file_and_return_path(
     base_xml_path: str,

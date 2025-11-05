@@ -4,16 +4,16 @@ from brax.envs.SafePointGoal import SafePointGoal
 import imageio.v3 as iio
 
 
-def run_random_episode(step, reset, steps: int = 100):
+def run_random_episode(env, jit_step, jit_reset, steps: int = 100):
     seed = jax.random.PRNGKey(4242)
-    action = jax.numpy.ones(8)
-    state = reset(seed)
+    action = jax.numpy.ones(env.action_size)
+    state = jit_reset(seed)
 
     print(f"Starting episode")
 
     states = [state]
     for i in range(steps):
-        state = step(state, action)
+        state = jit_step(state, action)
         states.append(state)
         print("Step", i)
 
@@ -44,7 +44,7 @@ def _init_safe_goal():
 
 if __name__ == '__main__':
     env, step, reset = _init_safe_goal()
-    states = run_random_episode(step, reset)
+    states = run_random_episode(env, step, reset)
     render_states(env, states)
 
     from brax.envs.env_utils import get_action_dimensions
