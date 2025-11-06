@@ -10,6 +10,7 @@ from brax.envs.goals import GoalManager
 from brax.envs.hazards import HazardManager
 
 import xml.etree.ElementTree as ET
+from xml.dom import minidom
 from pathlib import Path
 from typing import Union
 
@@ -77,7 +78,9 @@ def generate_point_goal_xml(
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_xml_path = os.path.join(current_dir, "assets", "point.xml")
 
-    return _create_temporary_file_and_return_path(base_xml_path, goal_manager, hazard_manager, env_name)
+    return _create_temporary_file_and_return_path(
+        base_xml_path, goal_manager, hazard_manager, env_name
+    )
 
 
 def generate_goal_xml_from_base(
@@ -98,15 +101,15 @@ def generate_goal_xml_from_base(
         Path to the generated temporary XML file
     """
     return _create_temporary_file_and_return_path(
-        base_xml_file_path(base_xml_name),
-        goal_manager,
-        hazard_manager,
-        env_name
+        base_xml_file_path(base_xml_name), goal_manager, hazard_manager, env_name
     )
 
 
 def base_xml_file_path(base_xml_name: str) -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", base_xml_name)
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "assets", "safegoal", base_xml_name
+    )
+
 
 def _create_temporary_file_and_return_path(
     base_xml_path: str,
@@ -165,7 +168,7 @@ def get_action_dimensions(xml_path: Union[str, Path]) -> int:
     root = tree.getroot()
 
     # Find the <actuator> section
-    actuator_section = root.find('actuator')
+    actuator_section = root.find("actuator")
 
     # If no actuator section exists, return 0
     if actuator_section is None:
@@ -178,7 +181,7 @@ def get_action_dimensions(xml_path: Union[str, Path]) -> int:
     # - position: position servo
     # - cylinder: pneumatic cylinder
     # - muscle: muscle actuator
-    actuator_types = ['motor', 'velocity', 'position', 'cylinder', 'muscle']
+    actuator_types = ["motor", "velocity", "position", "cylinder", "muscle"]
 
     total_actuators = 0
     for actuator_type in actuator_types:
@@ -186,6 +189,7 @@ def get_action_dimensions(xml_path: Union[str, Path]) -> int:
         total_actuators += len(actuators)
 
     return total_actuators
+
 
 # -------------------------------- Config overwriting --------------------------------
 

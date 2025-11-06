@@ -51,6 +51,7 @@ if __name__ == '__main__':
     names = ["ant.xml", "half_cheetah.xml", "hopper.xml",
              "humanoid.xml", "humanoidstandup.xml", "point.xml",
              "swimmer.xml", "walker2d.xml"]
+    # names = ["ant.xml"]
 
     for name in names:
         env, step, reset = _init_safe_goal(base_agent_name=name)
