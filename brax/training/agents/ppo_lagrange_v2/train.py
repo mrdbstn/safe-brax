@@ -421,6 +421,8 @@ def train(
             optax.adam(learning_rate=learning_rate),
         )
 
+    safety_bound /= episode_length  # The CLI defines an episodic safety bound for convenience, we need a per-step bound
+
     def loss_fn(params, normalizer_params, data, rng, lambda_lagr):
         return ppo_losses.compute_ppo_lagrange_loss(
             params=params,
