@@ -251,7 +251,7 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
         # Initialize wandb
         run_name = f"{env_name}_{alg_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_seed{seed}"
         wandb_project = config.wandb_project
-        wandb_group = config.wandb_group
+        wandb_group = config.wandb_group if config.wandb_group else env_name
         wandb_tags = config.wandb_tags
 
         wandb.init(
@@ -259,6 +259,7 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
             name=run_name,
             config=wandb_config,
             group=wandb_group,
+            job_type=alg_name,
             tags=wandb_tags,
         )
 
@@ -835,7 +836,7 @@ def main():
     # --- WandB ---
     parser.add_argument("--use_wandb", type=bool, default=True, help="Enable wandb logging")
     parser.add_argument("--wandb_project", type=str, default="safe-brax-experimental-results", help="W&B project")
-    parser.add_argument("--wandb_group", type=str, default="pointgoal-baselines", help="W&B group")
+    parser.add_argument("--wandb_group", type=str, default=None, help="W&B group")
     parser.add_argument("--wandb_tags", type=str, nargs='+', help="JSON list or path of tags")
 
     # --- Video Recording ---
