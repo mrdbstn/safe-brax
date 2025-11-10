@@ -118,12 +118,10 @@ class SafePointGoal(PipelineEnv):
     - Hazard compasses: 16 values (8 hazards × 2 values each)
     """
 
-    def __init__(self, cfg: config_dict.ConfigDict | dict = None):
-        config = default_config()
-
-        if cfg is not None:
-            config = config_merge(config, cfg)
-            expand_hazard_specs(config)
+    def __init__(self, config: config_dict.ConfigDict | dict = None):
+        if not config:
+            config = default_config()
+        expand_hazard_specs(config)
 
         # Store debug flag early for use in initialization
         self._debug = config.debug
