@@ -29,7 +29,7 @@ def default_config() -> config_dict.ConfigDict:
         physics=config_dict.create(
             backend='mjx',  # Use MJX backend for JAX-friendly physics
             n_frames=4,  # Physics steps per control step
-            timestep=0.002,  # Simulation timestep
+            timestep=0.02,  # Simulation timestep
             terminate_when_unhealthy=True,  # End episode if agent leaves healthy z-range
             healthy_z_range=(0.05, 0.3),  # Min/Max healthy z
             reset_noise_scale=0.005,  # Small reset noise on qpos/qvel
@@ -38,13 +38,13 @@ def default_config() -> config_dict.ConfigDict:
 
         # --- Reward settings ---
         reward=config_dict.create(
-            reward_goal=5.0,  # Sparse reward for reaching goal
+            reward_goal=1.0,  # Sparse reward for reaching goal
             dense_scale=0.0,  # Dense reward scale (progress toward goal)
         ),
 
         # --- Cost (safety) settings ---
         cost=config_dict.create(
-            scaler=0.1,  # Global safety cost scaler
+            scaler=1.0,  # Hazard cost scaler
             ctrl_cost_weight=0.001,  # Control effort cost
         ),
 

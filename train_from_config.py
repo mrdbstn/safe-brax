@@ -780,14 +780,15 @@ def main():
         type=_json_type,
         default={
             "physics": {
-                "timestep": 0.002,
+                "timestep": 0.02,
                 "n_frames": 4
             },
             "cost": {
+                "scaler": 1.0,
                 "ctrl_cost_weight": 0.001
             },
             "reward": {
-                "reward_goal": 5.0,
+                "reward_goal": 1.0,
                 "dense_scale": 0.0
             }
         },
@@ -848,9 +849,9 @@ def main():
                         help="Camera name or id (string name or numeric string index)")
     parser.add_argument("--video_width", type=int, default=320, help="Output video width")
     parser.add_argument("--video_height", type=int, default=240, help="Output video height")
-    parser.add_argument("--video_length", type=int, default=5000, help="Number of frames in the video")
-    parser.add_argument("--video_fps", type=int, default=50, help="Output video FPS")
-    parser.add_argument("--video_frame_stride", type=int, default=10, help="Output video frame stride")
+    parser.add_argument("--video_length", type=int, default=None, help="Number of frames in the video")
+    parser.add_argument("--video_fps", type=int, default=250, help="Output video FPS")
+    parser.add_argument("--video_frame_stride", type=int, default=1, help="Output video frame stride")
 
     config = parser.parse_args()
 
@@ -887,11 +888,12 @@ def main():
             )
 
         if not config.skip_video:
+            video_length = config.video_length if config.video_length else config.episode_length
             vid = record_episode_video(
                 env=eval_env,
                 make_inference_fn=make_inference_fn,
                 params=params,
-                steps=config.video_length,
+                steps=video_length,
                 camera=config.camera,
                 width=config.video_width,
                 height=config.video_height,
