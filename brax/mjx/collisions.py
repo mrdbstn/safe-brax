@@ -4,11 +4,13 @@ from typing import Optional, Union
 import jax
 import mujoco
 import numpy as np
+from jax import numpy as jp
 from mujoco.mjx._src import collision_driver
+from mujoco.mjx._src import math
 from mujoco.mjx._src import mesh
 from mujoco.mjx._src import types
-from mujoco.mjx._src.collision_driver import _COLLISION_FUNC
-from mujoco.mjx._src.collision_sdf import _optim, _cylinder, _box, collider
+from mujoco.mjx._src.collision_driver import COLLISION_FUNC
+from mujoco.mjx._src.collision_sdf import _optim, _cylinder, collider
 from mujoco.mjx._src.collision_types import Collision
 from mujoco.mjx._src.collision_types import GeomInfo
 from mujoco.mjx._src.io import _resolve_impl_and_device, _put_option, _put_statistic, _strip_weak_type
@@ -39,33 +41,41 @@ def put_model(
     """
 
     impl, device = _resolve_impl_and_device(impl, device)
-    return _put_model_jax(m, device)
+    return put_model_jax(m, device)
+
+
+def box(pos: jax.Array, size: jax.Array) -> jax.Array:
+    """Signed distance to an oriented box with half-extents = size."""
+    q = jp.abs(pos) - size  # size = [hx, hy, hz]
+    outside = jp.maximum(q, 0.0)
+    inside = jp.minimum(jp.maximum(q[0], jp.maximum(q[1], q[2])), 0.0)
+    return math.norm(outside) + inside
 
 
 @collider(ncon=1)
 def cylinder_box(c: GeomInfo, b: GeomInfo) -> Collision:
     """Cylinder vs Box via SDF clearance optimization."""
     x0 = 0.5 * (c.pos + b.pos)
-    return _optim(_cylinder, _box, c, b, x0)
+    return _optim(_cylinder, box, c, b, x0)
 
 
 @collider(ncon=1)
 def box_cylinder(b: GeomInfo, c: GeomInfo) -> Collision:
     """Box vs Cylinder; just flip args into the same optimizer."""
     x0 = 0.5 * (b.pos + c.pos)
-    return _optim(_box, _cylinder, b, c, x0)
+    return _optim(box, _cylinder, b, c, x0)
 
 
-_COLLISION_FUNC[(GeomType.BOX, GeomType.CYLINDER)] = box_cylinder
-_COLLISION_FUNC[(GeomType.CYLINDER, GeomType.BOX)] = cylinder_box
+COLLISION_FUNC[(GeomType.BOX, GeomType.CYLINDER)] = box_cylinder
+COLLISION_FUNC[(GeomType.CYLINDER, GeomType.BOX)] = cylinder_box
 
 
 def has_collision_fn(t1: GeomType, t2: GeomType) -> bool:
     """Returns True if a collision function exists for a pair of geom types."""
-    return (t1, t2) in _COLLISION_FUNC
+    return (t1, t2) in COLLISION_FUNC
 
 
-def _put_model_jax(
+def put_model_jax(
         m: mujoco.MjModel,
         device: Optional[jax.Device] = None,
 ) -> types.Model:
