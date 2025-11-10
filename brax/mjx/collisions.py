@@ -9,7 +9,7 @@ from mujoco.mjx._src import collision_driver
 from mujoco.mjx._src import math
 from mujoco.mjx._src import mesh
 from mujoco.mjx._src import types
-from mujoco.mjx._src.collision_driver import COLLISION_FUNC
+from mujoco.mjx._src.collision_driver import _COLLISION_FUNC
 from mujoco.mjx._src.collision_sdf import _optim, _cylinder, collider
 from mujoco.mjx._src.collision_types import Collision
 from mujoco.mjx._src.collision_types import GeomInfo
@@ -66,13 +66,13 @@ def box_cylinder(b: GeomInfo, c: GeomInfo) -> Collision:
     return _optim(box, _cylinder, b, c, x0)
 
 
-COLLISION_FUNC[(GeomType.BOX, GeomType.CYLINDER)] = box_cylinder
-COLLISION_FUNC[(GeomType.CYLINDER, GeomType.BOX)] = cylinder_box
+_COLLISION_FUNC[(GeomType.BOX, GeomType.CYLINDER)] = box_cylinder
+_COLLISION_FUNC[(GeomType.CYLINDER, GeomType.BOX)] = cylinder_box
 
 
 def has_collision_fn(t1: GeomType, t2: GeomType) -> bool:
     """Returns True if a collision function exists for a pair of geom types."""
-    return (t1, t2) in COLLISION_FUNC
+    return (t1, t2) in _COLLISION_FUNC
 
 
 def put_model_jax(
