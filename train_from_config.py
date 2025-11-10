@@ -850,7 +850,7 @@ def main():
     parser.add_argument("--video_width", type=int, default=320, help="Output video width")
     parser.add_argument("--video_height", type=int, default=240, help="Output video height")
     parser.add_argument("--video_length", type=int, default=None, help="Number of frames in the video")
-    parser.add_argument("--video_fps", type=int, default=250, help="Output video FPS")
+    parser.add_argument("--video_fps", type=int, default=100, help="Output video FPS")
     parser.add_argument("--video_frame_stride", type=int, default=1, help="Output video frame stride")
 
     config = parser.parse_args()
