@@ -783,8 +783,8 @@ def main():
     parser.add_argument("--env_kwargs", type=_json_type, default={
         "config_overrides": {
             "ctrl_cost_weight": 0.001,
-            "reward_goal": 10.0,
-            "reward_distance": 3,
+            "reward_goal": 5.0,
+            "reward_distance": 0.0,
             "reward_orientation": False,
             "reward_orientation_scale": 0.002,
         },
@@ -823,7 +823,7 @@ def main():
                         help="Env steps between training metrics logs")
 
     # --- PPO-Lagrange ---
-    parser.add_argument("--safety_bound", type=float, default=0.2, help="Safety constraint bound")
+    parser.add_argument("--safety_bound", type=float, default=25.0, help="Episodic safety constraint bound")
     parser.add_argument("--lagrangian_coef_rate", type=float, default=0.001, help="Lagrange multiplier LR")
     parser.add_argument("--initial_lambda_lagr", type=float, default=0.0, help="Initial lambda value")
 

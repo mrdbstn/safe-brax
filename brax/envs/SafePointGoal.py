@@ -38,8 +38,8 @@ def default_config() -> config_dict.ConfigDict:
 
         # --- Reward settings ---
         reward=config_dict.create(
-            sparse=5.0,  # Sparse reward for reaching goal
-            dense_scale=1.0,  # Dense reward scale (progress toward goal)
+            reward_goal=5.0,  # Sparse reward for reaching goal
+            dense_scale=0.0,  # Dense reward scale (progress toward goal)
         ),
 
         # --- Cost (safety) settings ---
@@ -239,7 +239,7 @@ class SafePointGoal(PipelineEnv):
         self._config = config
 
         # Reward
-        self._reward_goal = config.reward.sparse
+        self._reward_goal = config.reward.reward_goal
         self._reward_distance = config.reward.dense_scale
 
         # Cost
@@ -942,7 +942,7 @@ def SafePointGoal_MixedHazards():
     config.hazards.specs = [
         {"type": "cube", "count": 3, "size": 0.3, "height": 0.3, "collidable": False},
         {"type": "cube", "count": 2, "size": 0.2, "height": 0.5, "collidable": True},
-        {"type": "cylinder", "count": 4, "size": 0.3, "height": 0.01, "collidable": False},
+        {"type": "cylinder", "count": 4, "size": 0.4, "height": 0.01, "collidable": False},
         {"type": "cylinder", "count": 3, "size": 0.2, "height": 0.4, "collidable": True},
     ]
     return SafePointGoal(config)
