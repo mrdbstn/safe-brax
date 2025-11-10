@@ -3,16 +3,11 @@ import tempfile
 
 import jax
 from jax import numpy as jp
-from ml_collections import config_dict
+from ml_collections.config_dict import ConfigDict
 
 from brax.envs.builder import XMLBuilder
 from brax.envs.goals import GoalManager
 from brax.envs.hazards import HazardManager
-
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
-from pathlib import Path
-from typing import Union
 
 
 # -------------------------------- World building --------------------------------
@@ -61,9 +56,9 @@ def create_goal_manager_from_config(goals_cfg) -> GoalManager:
 
 
 def generate_point_goal_xml(
-    goal_manager: GoalManager,
-    hazard_manager: HazardManager,
-    env_name="point_goal_hazard",
+        goal_manager: GoalManager,
+        hazard_manager: HazardManager,
+        env_name="point_goal_hazard",
 ) -> str:
     """Generate XML file content with the specified goals and hazards.
 
@@ -84,10 +79,10 @@ def generate_point_goal_xml(
 
 
 def generate_goal_xml_from_base(
-    base_xml_name: str,
-    goal_manager: GoalManager,
-    hazard_manager: HazardManager,
-    env_name="goal_hazard",
+        base_xml_name: str,
+        goal_manager: GoalManager,
+        hazard_manager: HazardManager,
+        env_name="goal_hazard",
 ) -> str:
     """Generate XML file content with the specified goals and hazards.
 
@@ -112,10 +107,10 @@ def base_xml_file_path(base_xml_name: str) -> str:
 
 
 def _create_temporary_file_and_return_path(
-    base_xml_path: str,
-    goal_manager: GoalManager,
-    hazard_manager: HazardManager,
-    env_name="goal_hazard",
+        base_xml_path: str,
+        goal_manager: GoalManager,
+        hazard_manager: HazardManager,
+        env_name="goal_hazard",
 ):
     # Use XMLBuilder to generate complete XML
     builder = XMLBuilder(env_name)
@@ -132,18 +127,24 @@ def _create_temporary_file_and_return_path(
 
     return temp_path
 
+
 # -------------------------------- Config overwriting --------------------------------
 
 
-def shallow_merge(base: config_dict.ConfigDict, over: config_dict.ConfigDict | None):
+def config_merge(base: ConfigDict, over: ConfigDict | dict):
+    """Recursively merges two ConfigDicts/dicts, preserving nested keys."""
     if over is None:
         return base
+
     for k, v in over.items():
-        base[k] = v
+        if k in base and isinstance(base[k], (dict, ConfigDict)) and isinstance(v, (dict, ConfigDict)):
+            config_merge(base[k], v)
+        else:
+            base[k] = v
     return base
 
 
-def expand_hazard_specs(cfg: config_dict.ConfigDict):
+def expand_hazard_specs(cfg: ConfigDict):
     if not hasattr(cfg, "hazards"):
         return cfg
     td = dict(getattr(cfg.hazards, "type_defaults", {}))
@@ -210,7 +211,7 @@ def sdf_cube(agent_xy, center_xy, half_sizes_xy, yaw=0.0):
 
 
 def sample_candidate_positions(
-    rng_key: jp.ndarray, num_candidates: int, keepout: float, placement_extents
+        rng_key: jp.ndarray, num_candidates: int, keepout: float, placement_extents
 ) -> jp.ndarray:
     """Sample many candidates within extents"""
     min_x, min_y, max_x, max_y = placement_extents
@@ -226,7 +227,7 @@ def sample_candidate_positions(
 
 
 def sample_position_in_extents(
-    rng_key: jp.ndarray, placement_extents, keepout: float = 0.0
+        rng_key: jp.ndarray, placement_extents, keepout: float = 0.0
 ) -> jp.ndarray:
     """Sample a position within the constrained placement extents."""
     min_x, min_y, max_x, max_y = placement_extents
@@ -246,14 +247,14 @@ def sample_position_in_extents(
 
 
 def choose_valid_position(
-    rng_key: jp.ndarray,
-    existing_positions_xy: jp.ndarray,
-    existing_keepouts: jp.ndarray,
-    active_count: jp.ndarray,
-    candidate_keepout: float,
-    num_candidates: int,
-    placement_extents: tuple[float, float, float, float],
-    placement_margin: float,
+        rng_key: jp.ndarray,
+        existing_positions_xy: jp.ndarray,
+        existing_keepouts: jp.ndarray,
+        active_count: jp.ndarray,
+        candidate_keepout: float,
+        num_candidates: int,
+        placement_extents: tuple[float, float, float, float],
+        placement_margin: float,
 ) -> tuple[jp.ndarray, jp.ndarray]:
     """
     Pick a valid (x, y, z) position for a new object given already-placed objects
@@ -304,7 +305,7 @@ def choose_valid_position(
 
     # Required separation per neighbor j for this candidate
     required = (
-        existing_keepouts[None, :] + candidate_keepout + placement_margin
+            existing_keepouts[None, :] + candidate_keepout + placement_margin
     )  # (1, N)
 
     # Slack: positive means candidate meets clearance against that neighbor
@@ -366,15 +367,15 @@ def choose_valid_position(
 
 
 def place_objects(
-    rng_key: jp.ndarray,
-    positions_xy: jp.ndarray,
-    keepouts_array: jp.ndarray,
-    placed_count: jp.ndarray,
-    per_item_keepouts: jp.ndarray,
-    num_items: int,
-    num_candidates: int,
-    placement_extents,
-    placement_margin: float,
+        rng_key: jp.ndarray,
+        positions_xy: jp.ndarray,
+        keepouts_array: jp.ndarray,
+        placed_count: jp.ndarray,
+        per_item_keepouts: jp.ndarray,
+        num_items: int,
+        num_candidates: int,
+        placement_extents,
+        placement_margin: float,
 ):
     """
     Place `num_items` objects using per-item keepout radii, updating

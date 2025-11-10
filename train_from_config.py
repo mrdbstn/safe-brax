@@ -229,15 +229,11 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
         Tuple of (make_inference_fn, params, final_eval_metrics)
     """
     env_name = config.env_name
-    if env_name is None:
-        raise ValueError("Config must include 'env' or 'env_name'.")
     alg_name = config.alg
 
-    num_timesteps = config.num_timesteps
-
     # Create environments
-    train_environment = envs.get_environment(env_name)
-    eval_env = envs.get_environment(env_name)
+    train_environment = envs.get_environment(env_name, **config.env_kwargs)
+    eval_env = envs.get_environment(env_name, **config.env_kwargs)
 
     print(f"Training environment '{env_name}' instantiated.")
     print(f"Evaluation environment '{env_name}' instantiated.")
@@ -289,7 +285,7 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
             if value is not None:
                 final_log_data[key] = value
         if final_log_data:
-            wandb.log(final_log_data, step=int(float(np.asarray(num_timesteps).reshape(()))))
+            wandb.log(final_log_data, step=int(float(np.asarray(config.num_timesteps).reshape(()))))
 
     # Save model
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -774,21 +770,29 @@ def main():
     parser.add_argument("--quiet", action="store_true", help="Reduce verbosity")
     parser.add_argument("--skip-rollout", action="store_true", help="Skip rollout evaluation after training")
     parser.add_argument("--skip-video", action="store_true", help="Skip video recording after training")
-    parser.add_argument("--out_dir", type=str, default="runs/experimental_results",
-                        help="Directory for metrics/outputs")
+    parser.add_argument("--out_dir", type=str, default="runs/experimental_results", help="Directory for metrics/outputs")
     parser.add_argument("--model_dir", type=str, default="models", help="Directory to save model parameters")
 
     # --- Environment ---
     parser.add_argument("--env_name", type=str, default="safe_point_goal", help="Env name")
-    parser.add_argument("--env_kwargs", type=_json_type, default={
-        "config_overrides": {
-            "ctrl_cost_weight": 0.001,
-            "reward_goal": 5.0,
-            "reward_distance": 0.0,
-            "reward_orientation": False,
-            "reward_orientation_scale": 0.002,
+    parser.add_argument(
+        "--env_kwargs",
+        type=_json_type,
+        default={
+            "physics": {
+                "timestep": 0.002,
+                "n_frames": 4
+            },
+            "cost": {
+                "ctrl_cost_weight": 0.001
+            },
+            "reward": {
+                "reward_goal": 5.0,
+                "dense_scale": 0.0
+            }
         },
-    }, help="JSON string or path for env_kwargs")
+        help="JSON for env kwargs; use {'cfg': {...}} to override SafePointGoal default_config()"
+    )
 
     # --- Algorithm ---
     parser.add_argument("--alg", type=str, default="ppo_lagrange", help="Algorithm name (e.g., ppo, ppo_lagrange)")
@@ -879,7 +883,7 @@ def main():
                 seed=seed,
                 save_trajectory=True,
                 save_plots=True,
-                env_kwargs=config.get('env_kwargs', {})
+                env_kwargs=config.env_kwargs
             )
 
         if not config.skip_video:

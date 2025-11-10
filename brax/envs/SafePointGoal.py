@@ -16,7 +16,7 @@ from mujoco import mjx
 
 from brax.envs.base import PipelineEnv, State
 from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
-    generate_goal_xml_from_base, safe_norm, shallow_merge, expand_hazard_specs, choose_valid_position, \
+    generate_goal_xml_from_base, safe_norm, config_merge, expand_hazard_specs, choose_valid_position, \
     sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents, base_xml_file_path
 from brax.envs.hazards import _type_defaults_from_registry
 from brax.io import mjcf
@@ -118,11 +118,11 @@ class SafePointGoal(PipelineEnv):
     - Hazard compasses: 16 values (8 hazards × 2 values each)
     """
 
-    def __init__(self, cfg: config_dict.ConfigDict = None):
+    def __init__(self, cfg: config_dict.ConfigDict | dict = None):
         config = default_config()
 
         if cfg is not None:
-            config = shallow_merge(default_config(), cfg)
+            config = config_merge(config, cfg)
             expand_hazard_specs(config)
 
         # Store debug flag early for use in initialization
@@ -159,6 +159,7 @@ class SafePointGoal(PipelineEnv):
         try:
             mj_model = mujoco.MjModel.from_xml_path(xml_path)
             mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+            mj_model.opt.timestep = config.physics.timestep
             mj_model.opt.iterations = 4
             mj_model.opt.ls_iterations = 4
         finally:
@@ -905,21 +906,22 @@ class SafePointGoal(PipelineEnv):
         )
 
 
-def SafePointGoal_8Cubes():
+def SafePointGoal_8Cubes(**kwargs):
     """SafePointGoal with 8 cube hazards."""
-    return SafePointGoal()
+    return SafePointGoal(kwargs)
 
 
-def SafePointGoal_12Cubes():
+def SafePointGoal_12Cubes(**kwargs):
     """SafePointGoal with 12 cube hazards."""
     config = default_config()
     config.hazards.specs = [
         {"type": "cube", "count": 12},
     ]
+    config = config_merge(config, kwargs)
     return SafePointGoal(config)
 
 
-def SafePointGoal_12Cylinders():
+def SafePointGoal_12Cylinders(**kwargs):
     """SafePointGoal with 12 cylinder hazards."""
     config = default_config()
     config.goals.type = 'cylinder'
@@ -929,10 +931,11 @@ def SafePointGoal_12Cylinders():
     config.hazards.specs = [
         {"type": "cylinder", "count": 12, "size": 0.3, "height": 0.01, "collidable": False},
     ]
+    config = config_merge(config, kwargs)
     return SafePointGoal(config)
 
 
-def SafePointGoal_MixedHazards():
+def SafePointGoal_MixedHazards(**kwargs):
     """SafePointGoal with mixed hazard types: 5 cubes + 7 cylinders."""
     config = default_config()
     config.goals.type = 'cylinder'
@@ -945,4 +948,5 @@ def SafePointGoal_MixedHazards():
         {"type": "cylinder", "count": 4, "size": 0.4, "height": 0.01, "collidable": False},
         {"type": "cylinder", "count": 3, "size": 0.2, "height": 0.4, "collidable": True},
     ]
+    config = config_merge(config, kwargs)
     return SafePointGoal(config)
