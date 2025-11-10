@@ -113,7 +113,7 @@ class CubeHazard(BaseHazard):
 
     def proximity_cost(self, agent_xy: jp.ndarray, hazard_xy: jp.ndarray) -> jp.ndarray:
         dxdy = jp.abs(agent_xy - hazard_xy)
-        inside = jp.logical_and(dxdy[0] <= (self.size + 1e-8), dxdy[1] <= (self.size + 1e-8))
+        inside = jp.logical_and(dxdy[0] <= self.size, dxdy[1] <= self.size)
         return inside.astype(jp.float32)
 
     def get_xml_body(self) -> str:
@@ -154,7 +154,7 @@ class CylinderHazard(BaseHazard):
     def proximity_cost(self, agent_xy: jp.ndarray, hazard_xy: jp.ndarray) -> jp.ndarray:
         diff = agent_xy - hazard_xy
         dist = jp.sqrt(jp.sum(diff * diff) + 1e-8)
-        return jp.maximum(0.0, 1.0 - dist / (self.size + 1e-8))
+        return jp.maximum(0.0, 1.0 - dist / self.size)
 
     def get_xml_body(self) -> str:
         """Generate XML body for cylinder hazard."""
