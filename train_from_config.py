@@ -849,8 +849,7 @@ def main():
     parser.add_argument("--wandb_tags", type=str, nargs='+', help="JSON list or path of tags")
 
     # --- Video Recording ---
-    parser.add_argument("--camera", type=str, default="fixedfar",
-                        help="Camera name or id (string name or numeric string index)")
+    parser.add_argument("--cameras", type=str, nargs="+", default=["fixedfar", "vision"], help="Camera names or ids")
     parser.add_argument("--video_width", type=int, default=320, help="Output video width")
     parser.add_argument("--video_height", type=int, default=240, help="Output video height")
     parser.add_argument("--video_length", type=int, default=None, help="Number of frames in the video")
@@ -898,7 +897,7 @@ def main():
                 make_inference_fn=make_inference_fn,
                 params=params,
                 steps=video_length,
-                camera=config.camera,
+                cameras=config.cameras,
                 width=config.video_width,
                 height=config.video_height,
                 fps=config.video_fps,
