@@ -50,35 +50,7 @@ except ImportError:
         train_ppo_cost = None
         RewardMinusCostWrapper = None  # type: ignore
 
-try:
-    from brax.training.agents.ppo_lagrange_v3 import train as ppo_lagrange_v3_train
-except ImportError:
-    try:
-        from brax.training.agents import ppo_lagrange_v3
-
-        ppo_lagrange_v3_train = ppo_lagrange_v3.train
-    except ImportError:
-        ppo_lagrange_v3_train = None
-
-try:
-    from brax.training.agents.ppo_lagrange_v2 import train as ppo_lagrange_v2_train
-except ImportError:
-    try:
-        from brax.training.agents import ppo_lagrange_v2
-
-        ppo_lagrange_v2_train = ppo_lagrange_v2.train
-    except ImportError:
-        ppo_lagrange_v2_train = None
-
-try:
-    from brax.training.agents.ppo_lagrange import train as ppo_lagrange_train
-except ImportError:
-    try:
-        from brax.training.agents import ppo_lagrange
-
-        ppo_lagrange_train = ppo_lagrange.train
-    except ImportError:
-        ppo_lagrange_train = None
+from brax.training.agents.ppo_lag import train as ppo_lag
 from brax.io import model as brax_model
 from brax.io import json as brax_json
 import wandb
@@ -185,25 +157,10 @@ def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) 
 
 def get_algorithm_train_fn(alg_name: str):
     """Get the appropriate training function based on algorithm name."""
-    # Try to find the best available PPO-Lagrange version
-    if ppo_lagrange_v2_train is not None:
-        default_ppol = ppo_lagrange_v2_train
-    elif ppo_lagrange_v3_train is not None:
-        default_ppol = ppo_lagrange_v3_train
-    elif ppo_lagrange_train is not None:
-        default_ppol = ppo_lagrange_train
-    else:
-        default_ppol = None
-
     alg_map = {
         'ppo': ppo_train,
         'ppo_cost': train_ppo_cost,
-        'ppoc': train_ppo_cost,  # Alias
-        'ppo_lagrange': default_ppol,
-        'ppo_lagrange_v2': ppo_lagrange_v2_train or default_ppol,
-        'ppo_lagrange_v3': ppo_lagrange_v3_train or default_ppol,
-        'ppol': default_ppol,  # Alias
-        'ppol_v3': ppo_lagrange_v3_train or default_ppol,  # Alias
+        'ppo_lagrange': ppo_lagrange_v2_train,
     }
 
     train_fn = alg_map.get(alg_name)
