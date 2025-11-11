@@ -161,7 +161,7 @@ def get_algorithm_train_fn(alg_name: str):
     alg_map = {
         'ppo': ppo_train,
         'ppo_cost': train_ppo_cost,
-        'ppo_lagrange': ppo_lag,
+        'ppo_lag': ppo_lag,
         'ppo_pid': ppo_pid,
     }
 
@@ -755,11 +755,11 @@ def main():
                 "dense_scale": 0.0
             }
         },
-        help="JSON for env kwargs; use {'cfg': {...}} to override SafePointGoal default_config()"
+        help="JSON for env kwargs"
     )
 
     # --- Algorithm ---
-    parser.add_argument("--alg", type=str, default="ppo_lagrange", help="Algorithm name (e.g., ppo, ppo_lagrange)")
+    parser.add_argument("--alg", type=str, default="ppo_lag", help="Algorithm name (e.g., ppo, ppo_lag)")
     parser.add_argument("--max_devices_per_host", type=int, default=None, help="Limit devices per host")
 
     # --- Training Scale / Rollout ---
