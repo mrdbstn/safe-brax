@@ -781,6 +781,8 @@ def create_rollout_plots(rollout_metrics_data: Dict[str, List], env_name: str) -
         # humanoid_hop specific plots
         # Plot 3: Reward Component Breakdown
         plt.figure(figsize=(12, 7))
+        if 'airtime_reward' in rollout_metrics_data:
+            plt.plot(time_steps, rollout_metrics_data['airtime_reward'], label='Airtime Reward', alpha=0.7)
         if 'forward_reward' in rollout_metrics_data:
             plt.plot(time_steps, rollout_metrics_data['forward_reward'], label='Forward Reward', alpha=0.7)
         if 'reward_alive' in rollout_metrics_data:

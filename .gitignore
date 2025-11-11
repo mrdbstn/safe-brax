@@ -130,3 +130,7 @@ results/hparam_search/*
 
 batchjobs/*
 
+*.pdf
+*.csv
+*.tex
+*.png
