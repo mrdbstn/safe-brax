@@ -830,7 +830,7 @@ def main():
 
     # --- PPO-Lagrange ---
     parser.add_argument("--safety_bound", type=float, default=25.0, help="Episodic safety constraint bound")
-    parser.add_argument("--lagrangian_coef_rate", type=float, default=0.01, help="Lagrange multiplier LR")
+    parser.add_argument("--lagrangian_coef_rate", type=float, default=10.0, help="Lagrange multiplier LR")
     parser.add_argument("--initial_lambda_lagr", type=float, default=0.0, help="Initial lambda value")
 
     # --- PPO-Cost verification ---
