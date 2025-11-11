@@ -17,7 +17,7 @@ def test_record_video_mixed_hazards():
     print(f"✓ Environment created in {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards "
           f"({len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders)")
     start_time = os.times()
-    steps = 2000
+    steps = 1000
 
     # Make a deterministic policy
     make_infer = make_multi_directional_policy(

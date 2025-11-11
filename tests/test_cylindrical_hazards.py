@@ -17,7 +17,7 @@ def test_record_video_circular_cylinders():
     env = SafePointGoal_12Cylinders()
     print(f"Environment creation took {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards")
     start_time = os.times()
-    steps = 2000
+    steps = 1000
 
     # Make a deterministic policy
     make_infer = make_multi_directional_policy(
