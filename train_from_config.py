@@ -795,6 +795,14 @@ def main():
     parser.add_argument("--lagrangian_coef_rate", type=float, default=10.0, help="Lagrange multiplier LR")
     parser.add_argument("--initial_lambda_lagr", type=float, default=0.0, help="Initial lambda value")
 
+    # --- PPO-PID Lagrange ---
+    parser.add_argument("--pid_kp", type=float, default=0.1, help="PID: proportional gain")
+    parser.add_argument("--pid_ki", type=float, default=0.01, help="PID: integral gain")
+    parser.add_argument("--pid_kd", type=float, default=0.01, help="PID: derivative gain")
+    parser.add_argument("--pid_integral_clip", type=float, default=10.0, help="PID: anti-windup cap for integral term")
+    parser.add_argument("--pid_lambda_clip", type=float, default=1e6, help="PID: clamp for lambda")
+    parser.add_argument("--pid_deriv_ema_beta", type=float, default=0.95, help="PID: derivative EMA smoothing")
+
     # --- PPO-Cost verification ---
     parser.add_argument("--ppoc-verify-log-steps", type=int, default=0,
                         help="If >0 and alg is ppo_cost, run verify rollout and log shaping")

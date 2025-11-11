@@ -228,12 +228,12 @@ def train(
         lagrangian_coef_rate: float = 0.01,
         initial_lambda_lagr: float = 0.0,
         # PID-Lagrange
-        pid_kp: float = 1.0,
-        pid_ki: float = 0.1,
-        pid_kd: float = 0.0,
+        pid_kp: float = 0.1,
+        pid_ki: float = 0.01,
+        pid_kd: float = 0.01,
         pid_integral_clip: float = 10.0,   # anti-windup cap on the integral term
         pid_lambda_clip: float = 1e6,      # clamp lambda for sanity
-        pid_deriv_ema_beta: float = 0.9,   # smoothing for derivative term
+        pid_deriv_ema_beta: float = 0.95,  # smoothing for derivative term
         # eval
         num_evals: int = 0,
         eval_env: Optional[envs.Env] = None,
@@ -524,8 +524,8 @@ def train(
         return (optimizer_state, params, key), metrics
 
     def training_step(
-            carry: Tuple[TrainingState, envs.State, PRNGKey], unused_t
-    ) -> Tuple[Tuple[TrainingState, envs.State, PRNGKey], Metrics]:
+            carry: Tuple[PIDTrainingState, envs.State, PRNGKey], unused_t
+    ) -> Tuple[Tuple[PIDTrainingState, envs.State, PRNGKey], Metrics]:
         training_state, state, key = carry
         key_sgd, key_generate_unroll, new_key = jax.random.split(key, 3)
 
