@@ -613,12 +613,12 @@ def record_episode_video(
         make_inference_fn,
         params,
         steps: int = 2500,
-        camera: str | int = 0,  # camera name or id
+        cameras: List[str] | List[int] = (0,),  # camera names or ids
         width: int = 320,
         height: int = 240,
         fps: int = 100,
         frame_stride=1,
-        out_name: str = "rollout.mp4",
+        out_name: str = "rollout",
         log_to_wandb: bool = True,
         seed: int = 0,
         show_metrics: bool = True,  # Print the cost on the screen
@@ -694,61 +694,64 @@ def record_episode_video(
     costs = costs_full[keep_idx]
 
     # 4) Render the episode
-    rendering = env.render(frames, width=width, height=height, camera=camera)
-    print("Rendering took %.2f seconds." % (os.times()[4] - start_time[4]))
+    for camera in cameras:
+        rendering = env.render(frames, width=width, height=height, camera=camera)
+        print("Rendering took %.2f seconds." % (os.times()[4] - start_time[4]))
 
-    # 5) Add reward/cost overlay
-    if show_metrics:
-        start_time = os.times()
-        rendering_with_metrics = []
-        try:
-            # Try to load a font, fallback to default if not available
-            font = ImageFont.truetype(f"{font}.ttf", 20)
-        except (OSError, IOError):
-            font = ImageFont.load_default()
+        # 5) Add reward/cost overlay
+        if show_metrics:
+            start_time = os.times()
+            rendering_with_metrics = []
+            try:
+                # Try to load a font, fallback to default if not available
+                font = ImageFont.truetype(f"{font}.ttf", 20)
+            except (OSError, IOError):
+                font = ImageFont.load_default()
 
-        for i, (frame, reward, cost) in enumerate(zip(rendering, rewards, costs)):
-            # Convert frame to PIL Image
-            img = Image.fromarray(frame.astype(np.uint8))
-            draw = ImageDraw.Draw(img)
+            for i, (frame, reward, cost) in enumerate(zip(rendering, rewards, costs)):
+                # Convert frame to PIL Image
+                img = Image.fromarray(frame.astype(np.uint8))
+                draw = ImageDraw.Draw(img)
 
-            # Extract metrics from the state info
-            total_reward = float(cum_rewards_at_frames[i])
-            total_cost = float(cum_costs_at_frames[i])
+                # Extract metrics from the state info
+                total_reward = float(cum_rewards_at_frames[i])
+                total_cost = float(cum_costs_at_frames[i])
 
-            # Add cost text overlay
-            reward_text = f"Reward: {total_reward:.2f}"
-            cost_text = f"Cost: {total_cost:.2f}"
+                # Add cost text overlay
+                reward_text = f"Reward: {total_reward:.2f}"
+                cost_text = f"Cost: {total_cost:.2f}"
 
-            # Color
-            text_color_reward = (50, 220, 50)  # Green text
-            text_color_cost = (230, 60, 60)  # Red text
-            outline_color = (0, 0, 0)  # Black outline
+                # Color
+                text_color_reward = (50, 220, 50)  # Green text
+                text_color_cost = (230, 60, 60)  # Red text
+                outline_color = (0, 0, 0)  # Black outline
 
-            # Position text in top-left corner
-            x_rew, y_rew = 10, 10
-            x_cost, y_cost = 10, 40
+                # Position text in top-left corner
+                x_rew, y_rew = 10, 10
+                x_cost, y_cost = 10, 40
 
-            # Draw text with outline for better visibility
-            draw.text((x_rew, y_rew), reward_text, font=font, fill=text_color_reward, stroke_width=2,
-                      stroke_fill=outline_color)
-            draw.text((x_cost, y_cost), cost_text, font=font, fill=text_color_cost, stroke_width=2,
-                      stroke_fill=outline_color)
+                # Draw text with outline for better visibility
+                draw.text((x_rew, y_rew), reward_text, font=font, fill=text_color_reward, stroke_width=2,
+                          stroke_fill=outline_color)
+                draw.text((x_cost, y_cost), cost_text, font=font, fill=text_color_cost, stroke_width=2,
+                          stroke_fill=outline_color)
 
-            # Convert back to numpy array
-            rendering_with_metrics.append(np.array(img))
+                # Convert back to numpy array
+                rendering_with_metrics.append(np.array(img))
 
-        rendering = rendering_with_metrics
-        print("Overlay text took %.2f seconds." % (os.times()[4] - start_time[4]))
+            rendering = rendering_with_metrics
+            print("Overlay text took %.2f seconds." % (os.times()[4] - start_time[4]))
 
-    # 6) Save mp4 (and log)
-    os.makedirs("videos", exist_ok=True)
-    mp4_path = os.path.join("videos", out_name)
-    iio.imwrite(mp4_path, np.stack(rendering), fps=fps)
+        # 6) Save mp4 (and log)
+        file_name = f"{out_name}_{camera}.mp4"
+        os.makedirs("videos", exist_ok=True)
+        mp4_path = os.path.join("videos", file_name)
+        iio.imwrite(mp4_path, np.stack(rendering), fps=fps)
 
-    if log_to_wandb and wandb.run is not None:
-        wandb.log({"rollout/video": wandb.Video(mp4_path, fps=fps, format="mp4")})
-    return mp4_path
+        if log_to_wandb and wandb.run is not None:
+            wandb.log({f"video/{camera}": wandb.Video(mp4_path, fps=fps, format="mp4")})
+
+        print("Saved video:", mp4_path)
 
 
 def _json_type(s):
@@ -890,7 +893,7 @@ def main():
 
         if not config.skip_video:
             video_length = config.video_length if config.video_length else config.episode_length
-            vid = record_episode_video(
+            record_episode_video(
                 env=eval_env,
                 make_inference_fn=make_inference_fn,
                 params=params,
@@ -900,11 +903,10 @@ def main():
                 height=config.video_height,
                 fps=config.video_fps,
                 frame_stride=config.video_frame_stride,
-                out_name=f"{config.env_name}_{config.alg}_seed{seed}.mp4",
+                out_name=f"{config.env_name}_{config.alg}_seed{seed}",
                 log_to_wandb=config.use_wandb,
                 seed=seed,
             )
-            print("Saved video:", vid)
 
         # PPO-C verify shaping log if requested
         if config.alg in ('ppo_cost', 'ppoc') and config.ppoc_verify_log_steps > 0:

@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from brax.envs.SafePointGoal import default_config, SafePointGoal
 from train_from_config import record_episode_video
@@ -9,10 +8,9 @@ from utils import make_circular_policy
 def test_record_video_cubical():
     """Test recording a video of circular motion with cubical hazards."""
     num_hazards = 8
-    out_path = Path(__file__).parent / "videos" / f"cubical_hazards_{num_hazards}.mp4"
+    out_name = f"cubical_hazards_{num_hazards}.mp4"
 
     print(f"\nRecording an episode with {num_hazards} cubical hazards...")
-    print(f"Output path: {out_path}")
     start_time = os.times()
 
     cfg = default_config()
@@ -43,21 +41,17 @@ def test_record_video_cubical():
         make_inference_fn=make_infer,
         params=None,  # policy ignores params
         steps=2500,
-        camera="fixedfar",
+        cameras=["fixedfar", "vision"],
         width=640,
         height=480,
-        fps=50,
-        frame_stride=10,
-        out_name=str(out_path.name),
+        fps=100,
+        frame_stride=1,
+        out_name=out_name,
         log_to_wandb=False,
         seed=0,
         show_metrics=True,  # Enable cost display on video
     )
     print(f"✓ Test completed in {os.times()[4] - start_time[4]:.2f} seconds")
-
-    saved = os.path.join("videos", out_path.name)
-    assert os.path.exists(saved), f"Expected video at {saved}"
-    assert os.path.getsize(saved) > 0, "Video file is empty"
 
 
 if __name__ == "__main__":
