@@ -192,11 +192,12 @@ def compute_ppo_lagrange_loss(
       discount=discounting,
   )
   
-  # Modify advantages with Lagrangian term
-  modified_advantages = advantages - lambda_lagr * cost_advantages
-  
+  # Normalize advantages separately (if enabled), then combine with Lagrangian term
   if normalize_advantage:
-    modified_advantages = (modified_advantages - modified_advantages.mean()) / (modified_advantages.std() + 1e-8)
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    cost_advantages = (cost_advantages - cost_advantages.mean()) / (cost_advantages.std() + 1e-8)
+  # Modify advantages with Lagrangian term after any normalization
+  modified_advantages = advantages - lambda_lagr * cost_advantages
     
   rho_s = jnp.exp(target_action_log_probs - behaviour_action_log_probs)
 
