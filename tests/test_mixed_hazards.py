@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from brax.envs.SafePointGoal import SafePointGoal_MixedHazards
 from train_from_config import record_episode_video

@@ -227,9 +227,7 @@ def sample_candidate_positions(
     return jp.stack([xs, ys, zs], axis=1)
 
 
-def sample_position_in_extents(
-        rng_key: jp.ndarray, placement_extents, keepout: float = 0.0
-) -> jp.ndarray:
+def sample_position_in_extents(rng_key: jp.ndarray, placement_extents, keepout: float = 0.0) -> jp.ndarray:
     """Sample a position within the constrained placement extents."""
     min_x, min_y, max_x, max_y = placement_extents
 
@@ -245,6 +243,90 @@ def sample_position_in_extents(
     pos_y = jax.random.uniform(subkey, minval=min_y, maxval=max_y)
 
     return jp.array([pos_x, pos_y, 0.09])  # Fixed z-height
+
+
+def _valid_against_objects_shape_aware(
+        cand_xy: jp.ndarray,
+        obj_xy: jp.ndarray,               # [N, 2]
+        obj_is_rect: jp.ndarray,          # [N]
+        obj_half_extents: jp.ndarray,     # [N, 2]
+        obj_radii: jp.ndarray,            # [N]
+        active_count: jp.ndarray,         # scalar int32
+        goal_radius: jp.ndarray,          # scalar
+) -> jp.ndarray:
+    """
+    True if cand_xy does NOT intersect any object.
+    No dynamic slicing; we mask by [0..active_count).
+    """
+    N = obj_xy.shape[0]
+    valid_mask = (jp.arange(N, dtype=jp.int32) < active_count)  # [N] bool
+
+    d = jp.abs(obj_xy - cand_xy)  # [N,2]
+
+    # Rect overlap: AABB with Minkowski expansion by goal_radius
+    rect_expand = obj_half_extents + goal_radius  # [N,2]
+    rect_overlap = jp.logical_and(d[:, 0] <= rect_expand[:, 0], d[:, 1] <= rect_expand[:, 1])
+
+    # Circle overlap
+    dist = jp.linalg.norm(d, axis=-1)  # [N]
+    circle_overlap = dist < (obj_radii + goal_radius)  # [N]
+
+    # Pick by type
+    overlap = jp.where(obj_is_rect, rect_overlap, circle_overlap)  # [N]
+
+    # Only consider active objects
+    overlap = jp.logical_and(overlap, valid_mask)
+
+    # Valid if NO overlaps
+    return jp.logical_not(jp.any(overlap))
+
+
+def choose_valid_position_shape_aware(
+        rng_key: jp.ndarray,
+        obj_xy: jp.ndarray,               # [N,2]
+        obj_is_rect: jp.ndarray,          # [N]
+        obj_half_extents: jp.ndarray,     # [N,2]
+        obj_radii: jp.ndarray,            # [N]
+        active_count: jp.ndarray,         # scalar
+        goal_radius: float,               # scalar
+        max_attempts: int,
+        placement_extents: jp.ndarray,    # [2] half-sizes [ex, ey]
+        placement_margin: float,          # scalar
+):
+    """
+    Uniform rejection sampling inside the rectangle [-ex+m, ex-m] x [-ey+m, ey-m],
+    accepting candidates that do not overlap any object (rect or circle).
+    """
+    key1, key2 = jax.random.split(rng_key)
+    ex, ey = placement_extents
+    m = placement_margin
+    low = jp.array([-ex + m, -ey + m])
+    high = jp.array([ex - m,  ey - m])
+
+    def sample_xy(k):
+        return low + (high - low) * jax.random.uniform(k, (2,))
+
+    def body(carry, _):
+        k, chosen_xy, success = carry
+        k, kxy = jax.random.split(k)
+        cand_xy = sample_xy(kxy)
+        ok = _valid_against_objects_shape_aware(
+            cand_xy, obj_xy, obj_is_rect, obj_half_extents, obj_radii, active_count, goal_radius
+        )
+        new_xy = jp.where(success, chosen_xy, jp.where(ok, cand_xy, chosen_xy))
+        new_success = jp.logical_or(success, ok)
+        return (k, new_xy, new_success), None
+
+    (key_out, final_xy, success), _ = jax.lax.scan(
+        body,
+        (key2, obj_xy[0], jp.array(False)),
+        xs=jp.arange(max_attempts),
+    )
+
+    # Fallback: if nothing worked, return the first object's position (or any stable default)
+    out_xy = jp.where(success, final_xy, obj_xy[0])
+    new_pos_xyz = jp.array([out_xy[0], out_xy[1], 0.0])
+    return new_pos_xyz, key_out
 
 
 def choose_valid_position(

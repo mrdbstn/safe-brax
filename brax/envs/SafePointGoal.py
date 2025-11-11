@@ -16,8 +16,8 @@ from mujoco import mjx
 
 from brax.envs.base import PipelineEnv, State
 from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
-    generate_goal_xml_from_base, safe_norm, config_merge, expand_hazard_specs, choose_valid_position, \
-    sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents, base_xml_file_path, add_walls
+    generate_goal_xml_from_base, safe_norm, config_merge, expand_hazard_specs, sdf_cylinder, sdf_cube, place_objects, \
+    sample_position_in_extents, base_xml_file_path, add_walls, choose_valid_position_shape_aware
 from brax.envs.hazards import _type_defaults_from_registry
 from brax.io import mjcf
 
@@ -68,8 +68,8 @@ def default_config() -> config_dict.ConfigDict:
         goals=config_dict.create(
             type='cube',  # 'cube' or 'cylinder'
             count=1,  # Number of goals to instantiate
-            size=0.4,  # Cube: (w,h,d); Cylinder: radius. If None, use goal own defaults.
-            height=0.4,  # Cylinder/cube height
+            size=0.2,  # Cube: (w,h,d); Cylinder: radius. If None, use goal own defaults.
+            height=0.2,  # Cylinder/cube height
             positions=None,  # Optional explicit [(x,y,z), ...]; None => sampled
             collidable=False,  # Whether goal geoms participate in contact
         ),
@@ -90,7 +90,7 @@ def default_config() -> config_dict.ConfigDict:
             ],
         ),
 
-        base_agent_file_name="point.xml", # Name of the agent from the assets folder
+        base_agent_file_name="point.xml",  # Name of the agent from the assets folder
         # --- Debugging ---
         debug=False,  # Print extra diagnostics during setup/reset
     )
@@ -145,6 +145,25 @@ class SafePointGoal(PipelineEnv):
         self._hazard_keepouts = jp.array(
             [h.get_keepout_radius() for h in hazards], dtype=jp.float32
         )
+
+        is_rect = []
+        half_ext = []
+        radii = []
+
+        for h in hazards:
+            shape, param = h.get_keepout_shape()
+            if shape == "rect":
+                is_rect.append(True)
+                half_ext.append(jp.array([float(param[0]), float(param[1])]))
+                radii.append(0.0)
+            else:  # "circle"
+                is_rect.append(False)
+                half_ext.append(jp.array([0.0, 0.0]))
+                radii.append(float(param[0]))
+
+        self._hazard_is_rect = jp.array(is_rect, dtype=jp.bool_)
+        self._hazard_half_extents = jp.stack(half_ext) if len(hazards) > 0 else jp.zeros((0, 2))
+        self._hazard_radii = jp.array(radii) if len(hazards) > 0 else jp.zeros((0,))
 
         # For goal reachability checks
         packed = [g.encode_static_params() for g in goals]
@@ -214,7 +233,6 @@ class SafePointGoal(PipelineEnv):
         self._num_fixed_hazards = self._hazard_manager.get_fixed_hazard_count()
         self._num_movable_hazards = self._num_hazards - self._num_fixed_hazards
         self._num_goals = self._goal_manager.get_goal_count()
-
 
         # --- Find Sensor Indices, Addresses, and Dimensions ---
         self._sensor_info = {}
@@ -345,11 +363,20 @@ class SafePointGoal(PipelineEnv):
 
         # Set goal and hazard positions in mocap
         goal_ids = jp.array(self._goal_mocap_ids, dtype=jp.int32)
-        hazard_ids = jp.array(self._hazard_mocap_ids[:-self._num_fixed_hazards], dtype=jp.int32)
 
-        # Concatenate once, scatter once
-        all_ids = jp.concatenate([goal_ids, hazard_ids])
-        all_pos = jp.concatenate([goal_positions, hazard_positions], axis=0)
+        # Only include movable hazards in mocap positioning
+        if self._num_movable_hazards > 0:
+            hazard_ids = jp.array(self._hazard_mocap_ids[:self._num_movable_hazards], dtype=jp.int32)
+        else:
+            hazard_ids = jp.array([], dtype=jp.int32)
+
+        # Only concatenate if we have movable hazards
+        if self._num_movable_hazards > 0:
+            all_ids = jp.concatenate([goal_ids, hazard_ids])
+            all_pos = jp.concatenate([goal_positions, hazard_positions], axis=0)
+        else:
+            all_ids = goal_ids
+            all_pos = goal_positions
 
         mpos = data.mocap_pos
         mpos = mpos.at[all_ids].set(all_pos)
@@ -430,30 +457,35 @@ class SafePointGoal(PipelineEnv):
 
         total_objects = 1 + self._num_hazards + self._num_goals
 
-        # Object state buffers (centers and keepout radii), aligned by index:
-        #   0                                  -> agent
-        #   1 .. self._num_hazards             -> hazards
-        #   hazard_span_end .. total_objects -> goals
+        # Object state buffers (positions + shape for placement)
         object_positions_xy = jp.zeros((total_objects, 2))
-        object_keepouts = jp.zeros((total_objects,))
 
-        # Agent as object 0
+        # Shapes:
+        object_is_rect = jp.zeros((total_objects,), dtype=jp.bool_)
+        object_half_extents = jp.zeros((total_objects, 2))  # only for rects; zeros otherwise
+        object_radii = jp.zeros((total_objects,))  # only for circles; zeros otherwise
+
+        # Agent as object 0 (treat agent as circle with keepout self._agent_keepout)
         object_positions_xy = object_positions_xy.at[0].set(agent_xy)
-        object_keepouts = object_keepouts.at[0].set(self._agent_keepout)
+        object_is_rect = object_is_rect.at[0].set(False)
+        object_radii = object_radii.at[0].set(self._agent_keepout)
 
-        # Hazards as objects [1 : 1 + H)
+        # Hazards as objects [1 : 1+H)
         hazard_span_start = 1
         hazard_span_end = hazard_span_start + self._num_hazards
         object_positions_xy = object_positions_xy.at[hazard_span_start:hazard_span_end].set(hazard_positions_xy)
-        object_keepouts = object_keepouts.at[hazard_span_start:hazard_span_end].set(self._hazard_keepouts)
+
+        object_is_rect = object_is_rect.at[hazard_span_start:hazard_span_end].set(self._hazard_is_rect)
+        object_half_extents = object_half_extents.at[hazard_span_start:hazard_span_end].set(self._hazard_half_extents)
+        object_radii = object_radii.at[hazard_span_start:hazard_span_end].set(self._hazard_radii)
 
         # Goals as objects [hazard_span_end : hazard_span_end + G)
         goal_span_start = hazard_span_end
         goal_span_end = goal_span_start + self._num_goals
         object_positions_xy = object_positions_xy.at[goal_span_start:goal_span_end].set(goal_positions_xy)
-        object_keepouts = object_keepouts.at[goal_span_start:goal_span_end].set(self._goal_keepouts)
+        object_is_rect = object_is_rect.at[goal_span_start:goal_span_end].set(False)
+        object_radii = object_radii.at[goal_span_start:goal_span_end].set(self._goal_keepouts)
 
-        # All entries participate in separation during this step
         active_object_count = jp.array(total_objects, dtype=jp.int32)
 
         # Thread persistent RNG through respawns
@@ -465,48 +497,64 @@ class SafePointGoal(PipelineEnv):
             Otherwise keep its current position. We temporarily disable the goal's
             own object keepout while sampling, to avoid blocking itself.
             """
-            rng_key, obs_positions_xy, obs_keepouts, new_goal_positions_out = carry
+            rng_key, object_positions_xy, object_is_rect, object_half_extents, object_radii, new_goal_positions_out = carry
             object_slot = goal_span_start + goal_index  # where this goal sits in the object arrays
 
             def _place_new(_):
-                # Temporarily disable this goal’s own keepout so it can move freely.
-                keepouts_without_self = obs_keepouts.at[object_slot].set(0.0)
+                # Temporarily disable this goal’s own keepout while sampling
+                keep_is_rect_wo_self = object_is_rect
+                keep_half_extents_wo_self = object_half_extents
+                keep_radii_wo_self = object_radii.at[object_slot].set(0.0)
+
                 goal_keepout_radius = self._goal_keepouts[goal_index]
 
-                new_pos_xyz, next_rng = choose_valid_position(
+                # convert [minx, miny, maxx, maxy] -> half-extents [ex, ey]
+                minx, miny, maxx, maxy = self._placement_extents
+                placement_half_extents = jp.array([(maxx - minx) * 0.5, (maxy - miny) * 0.5], dtype=jp.float32)
+
+                new_pos_xyz, next_rng = choose_valid_position_shape_aware(
                     rng_key,
-                    obs_positions_xy,
-                    keepouts_without_self,
+                    object_positions_xy,
+                    keep_is_rect_wo_self,
+                    keep_half_extents_wo_self,
+                    keep_radii_wo_self,
                     active_object_count,
                     goal_keepout_radius,
                     self._max_placement_attempts,
-                    self._placement_extents,
+                    placement_half_extents,
                     self._placement_margin,
                 )
 
-                # Update object arrays at this slot with the new location and restore keepout.
-                updated_positions_xy = obs_positions_xy.at[object_slot].set(new_pos_xyz[:2])
-                updated_keepouts = obs_keepouts.at[object_slot].set(goal_keepout_radius)
-
-                # Record the new goal pose in the output array (aligned to [0..G))
+                # Update arrays at this slot and restore the radius
+                updated_positions_xy = object_positions_xy.at[object_slot].set(new_pos_xyz[:2])
                 updated_goal_positions_out = new_goal_positions_out.at[goal_index].set(new_pos_xyz)
-                return (next_rng, updated_positions_xy, updated_keepouts, updated_goal_positions_out)
+
+                updated_radii = object_radii.at[object_slot].set(goal_keepout_radius)
+
+                return (next_rng, updated_positions_xy, object_is_rect, object_half_extents, updated_radii,
+                        updated_goal_positions_out)
 
             def _keep_old(_):
-                # Keep current goal position; it already blocks others via object arrays.
                 updated_goal_positions_out = new_goal_positions_out.at[goal_index].set(goal_positions[goal_index])
                 next_rng, _ = jax.random.split(rng_key)
-                return (next_rng, obs_positions_xy, obs_keepouts, updated_goal_positions_out)
+                return (next_rng, object_positions_xy, object_is_rect, object_half_extents, object_radii,
+                        updated_goal_positions_out)
 
             return jax.lax.cond(reached_mask[goal_index], _place_new, _keep_old, operand=None)
 
         # Compute new positions for all goals (only those reached will move)
         new_goal_positions = jp.zeros_like(goal_positions)
-        (rng_for_goal_respawn, object_positions_xy, object_keepouts, new_goal_positions) = jax.lax.fori_loop(
+        (rng_for_goal_respawn,
+         object_positions_xy,
+         object_is_rect,
+         object_half_extents,
+         object_radii,
+         new_goal_positions) = jax.lax.fori_loop(
             0,
             self._num_goals,
             lambda i, carry: _place_or_keep_goal(carry, i),
-            (rng_for_goal_respawn, object_positions_xy, object_keepouts, new_goal_positions),
+            (rng_for_goal_respawn, object_positions_xy, object_is_rect, object_half_extents, object_radii,
+             new_goal_positions),
         )
 
         # Scatter updated goal mocaps back into the physics state

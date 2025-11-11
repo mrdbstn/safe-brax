@@ -103,6 +103,15 @@ class BaseHazard(ABC):
         """Return the keepout radius for placement constraints."""
         raise NotImplementedError
 
+    @abstractmethod
+    def get_keepout_shape(self):
+        """
+        Return a shape descriptor for placement:
+          - ("circle", jp.array([r]))
+          - ("rect",   jp.array([sx, sy]))   # half-extents in x/y
+        """
+        raise NotImplementedError
+
 
 class CubeHazard(BaseHazard):
     """Cube-shaped hazard with binary collision cost."""
@@ -142,6 +151,10 @@ class CubeHazard(BaseHazard):
     def get_keepout_radius(self) -> float:
         # box uses half-size in xy: safe radius is circumscribed
         return float(jp.sqrt(2.0) * self.size)
+
+    def get_keepout_shape(self):
+        # square AABB with half-extent = self.size
+        return "rect", jp.array([float(self.size), float(self.size)])
 
 
 class RectHazard(BaseHazard):
@@ -194,6 +207,10 @@ class RectHazard(BaseHazard):
         sx, sy = self.size_xy
         return float(jp.sqrt(sx * sx + sy * sy))  # circumscribed radius
 
+    def get_keepout_shape(self):
+        sx, sy = self.size_xy
+        return "rect", jp.array([float(sx), float(sy)])
+
 
 class CylinderHazard(BaseHazard):
     """Cylinder-shaped hazard with distance-based cost."""
@@ -231,6 +248,9 @@ class CylinderHazard(BaseHazard):
 
     def get_keepout_radius(self) -> float:
         return self.size  # Radius
+
+    def get_keepout_shape(self):
+        return "circle", jp.array([float(self.size)])
 
 
 class HazardManager:
