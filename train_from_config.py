@@ -160,7 +160,7 @@ def get_algorithm_train_fn(alg_name: str):
     alg_map = {
         'ppo': ppo_train,
         'ppo_cost': train_ppo_cost,
-        'ppo_lagrange': ppo_lagrange_v2_train,
+        'ppo_lagrange': ppo_lag,
     }
 
     train_fn = alg_map.get(alg_name)

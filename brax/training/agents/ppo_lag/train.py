@@ -36,9 +36,9 @@ from brax.training import pmap
 from brax.training import types
 from brax.training.acme import running_statistics
 from brax.training.acme import specs
-from brax.training.agents.ppo_lagrange_v2 import checkpoint
-from brax.training.agents.ppo_lagrange_v2 import losses as ppo_losses
-from brax.training.agents.ppo_lagrange_v2 import networks as ppo_networks
+from brax.training.agents.ppo_lag import checkpoint
+from brax.training.agents.ppo_lag import losses as ppo_losses
+from brax.training.agents.ppo_lag import networks as ppo_networks
 from brax.training.types import PRNGKey
 from brax.training.types import Params
 
