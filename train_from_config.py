@@ -51,6 +51,7 @@ except ImportError:
         RewardMinusCostWrapper = None  # type: ignore
 
 from brax.training.agents.ppo_lag import train as ppo_lag
+from brax.training.agents.ppo_pid import train as ppo_pid
 from brax.io import model as brax_model
 from brax.io import json as brax_json
 import wandb
@@ -161,6 +162,7 @@ def get_algorithm_train_fn(alg_name: str):
         'ppo': ppo_train,
         'ppo_cost': train_ppo_cost,
         'ppo_lagrange': ppo_lag,
+        'ppo_pid': ppo_pid,
     }
 
     train_fn = alg_map.get(alg_name)
