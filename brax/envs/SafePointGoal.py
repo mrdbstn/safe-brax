@@ -932,7 +932,7 @@ def SafePointGoal_12Cylinders(**kwargs):
     config = default_config()
     config.goals.type = 'cylinder'
     config.goals.count = 2
-    config.goals.size = 0.4
+    config.goals.size = 0.2
     config.goals.height = 0.2
     config.hazards.specs = [
         {"type": "cylinder", "count": 12, "size": 0.3, "height": 0.01, "collidable": False},
