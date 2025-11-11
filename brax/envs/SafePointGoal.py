@@ -370,6 +370,7 @@ class SafePointGoal(PipelineEnv):
             "goals_reached_count": 0,
             "goals_per_episode": 0,
             "cost": 0.0,
+            "respawn_rng": rng_layout,
         }
 
         obs = self._get_obs(data)
@@ -455,8 +456,8 @@ class SafePointGoal(PipelineEnv):
         # All entries participate in separation during this step
         active_object_count = jp.array(total_objects, dtype=jp.int32)
 
-        # Deterministic RNG for respawns this step
-        rng_for_goal_respawn = jax.random.PRNGKey(state.info["step_count"])
+        # Thread persistent RNG through respawns
+        rng_for_goal_respawn = state.info["respawn_rng"]
 
         def _place_or_keep_goal(carry, goal_index):
             """
@@ -556,6 +557,7 @@ class SafePointGoal(PipelineEnv):
             "goals_reached_count": updated_goals_reached,
             "goals_per_episode": updated_goals_per_episode,
             "cost": cost,
+            "respawn_rng": rng_for_goal_respawn,
         })
 
         return State(data, obs, reward, done.astype(jp.float32), metrics, new_info)
