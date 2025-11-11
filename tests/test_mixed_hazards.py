@@ -8,18 +8,15 @@ from utils import make_multi_directional_policy
 
 def test_record_video_mixed_hazards():
     """Test recording a video of circular motion with cylinder hazards."""
-    out_path = Path(__file__).parent / "videos" / f"mixed_hazards"
-
     print("\nRecording an episode with mixed hazards...")
-    print(f"Output path: {out_path}")
     start_time = os.times()
 
     # Create an environment with cylinder hazards
     env = SafePointGoal_MixedHazards()
     cube_hazards = env._hazard_manager.get_hazards_by_type("cube")
     cylinder_hazards = env._hazard_manager.get_hazards_by_type("cylinder")
-    print(
-        f"✓ Environment created in {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards ({len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders)")
+    print(f"✓ Environment created in {os.times()[4] - start_time[4]:.2f} seconds with {env._num_hazards} hazards "
+          f"({len(cube_hazards)} cubes, {len(cylinder_hazards)} cylinders)")
     start_time = os.times()
     steps = 2000
 

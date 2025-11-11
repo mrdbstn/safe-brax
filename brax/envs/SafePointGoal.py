@@ -17,7 +17,7 @@ from mujoco import mjx
 from brax.envs.base import PipelineEnv, State
 from brax.envs.env_utils import create_hazard_manager_from_config, create_goal_manager_from_config, \
     generate_goal_xml_from_base, safe_norm, config_merge, expand_hazard_specs, choose_valid_position, \
-    sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents, base_xml_file_path
+    sdf_cylinder, sdf_cube, place_objects, sample_position_in_extents, base_xml_file_path, add_walls
 from brax.envs.hazards import _type_defaults_from_registry
 from brax.io import mjcf
 
@@ -126,8 +126,12 @@ class SafePointGoal(PipelineEnv):
         # Store debug flag early for use in initialization
         self._debug = config.debug
 
+        # Add outer walls
+        hazards_cfg = config.hazards
+        hazards_cfg = add_walls(hazards_cfg, config.placement)
+
         # Build managers
-        self._hazard_manager = create_hazard_manager_from_config(config.hazards)
+        self._hazard_manager = create_hazard_manager_from_config(hazards_cfg)
         self._goal_manager = create_goal_manager_from_config(config.goals)
 
         # Obtain lists of goals and hazards
@@ -207,7 +211,10 @@ class SafePointGoal(PipelineEnv):
 
         # Get hazard information from HazardManager
         self._num_hazards = self._hazard_manager.get_hazard_count()
+        self._num_fixed_hazards = self._hazard_manager.get_fixed_hazard_count()
+        self._num_movable_hazards = self._num_hazards - self._num_fixed_hazards
         self._num_goals = self._goal_manager.get_goal_count()
+
 
         # --- Find Sensor Indices, Addresses, and Dimensions ---
         self._sensor_info = {}
@@ -301,7 +308,7 @@ class SafePointGoal(PipelineEnv):
         num_candidates = self._max_placement_attempts
 
         # Arrays to accumulate positions: max entries = agent + goal + hazards
-        max_entries = 1 + self._num_goals + self._num_hazards
+        max_entries = 1 + self._num_goals + self._num_movable_hazards
         positions_xy = jp.zeros((max_entries, 2))
         keepouts = jp.zeros((max_entries,))
 
@@ -330,7 +337,7 @@ class SafePointGoal(PipelineEnv):
             keepouts_array=keepouts,
             placed_count=count,
             per_item_keepouts=self._hazard_keepouts,
-            num_items=self._num_hazards,
+            num_items=self._num_movable_hazards,
             num_candidates=num_candidates,
             placement_extents=self._placement_extents,
             placement_margin=self._placement_margin,
@@ -338,7 +345,7 @@ class SafePointGoal(PipelineEnv):
 
         # Set goal and hazard positions in mocap
         goal_ids = jp.array(self._goal_mocap_ids, dtype=jp.int32)
-        hazard_ids = jp.array(self._hazard_mocap_ids, dtype=jp.int32)
+        hazard_ids = jp.array(self._hazard_mocap_ids[:-self._num_fixed_hazards], dtype=jp.int32)
 
         # Concatenate once, scatter once
         all_ids = jp.concatenate([goal_ids, hazard_ids])
@@ -347,6 +354,7 @@ class SafePointGoal(PipelineEnv):
         mpos = data.mocap_pos
         mpos = mpos.at[all_ids].set(all_pos)
         data = data.replace(mocap_pos=mpos)
+        hazard_positions = data.mocap_pos[jp.array(self._hazard_mocap_ids)]
 
         # Calculate initial distance to nearest goal
         agent_pos = data.xpos[self._agent_body]
@@ -928,6 +936,7 @@ def SafePointGoal_12Cylinders(**kwargs):
     config.goals.height = 0.2
     config.hazards.specs = [
         {"type": "cylinder", "count": 12, "size": 0.3, "height": 0.01, "collidable": False},
+        {"type": "outer_wall", "offset": 0.5, "thickness": 0.06, "height": 0.1, "collidable": True, "fixed": True},
     ]
     config = config_merge(config, kwargs)
     return SafePointGoal(config)
@@ -941,10 +950,11 @@ def SafePointGoal_MixedHazards(**kwargs):
     config.goals.size = 0.2
     config.goals.height = 0.2
     config.hazards.specs = [
-        {"type": "cube", "count": 3, "size": 0.3, "height": 0.3, "collidable": False},
+        {"type": "cube", "count": 3, "size": 0.3, "height": 0.01, "collidable": False},
         {"type": "cube", "count": 2, "size": 0.2, "height": 0.5, "collidable": True},
         {"type": "cylinder", "count": 4, "size": 0.4, "height": 0.01, "collidable": False},
         {"type": "cylinder", "count": 3, "size": 0.2, "height": 0.4, "collidable": True},
+        {"type": "outer_wall", "offset": 0.5, "thickness": 0.06, "height": 0.1, "collidable": True, "fixed": True},
     ]
     config = config_merge(config, kwargs)
     return SafePointGoal(config)

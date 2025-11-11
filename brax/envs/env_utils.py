@@ -27,10 +27,11 @@ def create_hazard_manager_from_config(hazards_cfg) -> HazardManager:
         manager.add_hazards(
             hazard_type=spec.get("type", "cube"),
             count=spec.get("count", 0),
+            positions=spec.get("positions", None),
             size=spec.get("size", None),
             height=spec.get("height", None),
             collidable=spec.get("collidable", True),
-            movable=spec.get("movable", False),
+            fixed=spec.get("fixed", False),
             density=spec.get("density", None),
         )
     return manager
@@ -425,6 +426,76 @@ def place_objects(
         )
     )
     return rng_key, positions_xy, keepouts_array, placed_count, placed_positions
+
+
+def add_walls(hazards_cfg: ConfigDict, placement_cfg: ConfigDict) -> ConfigDict:
+    td = dict(getattr(hazards_cfg, "type_defaults", {}))
+    specs = list(getattr(hazards_cfg, "specs", []))
+    resolved = []
+
+    for spec in specs:
+        if not isinstance(spec, dict):
+            resolved.append(spec)
+            continue
+
+        if spec.get("type") == "outer_wall":
+            # world half-extents
+            min_x, min_y, max_x, max_y = placement_cfg.extents
+            hx = 0.5 * (max_x - min_x)
+            hy = 0.5 * (max_y - min_y)
+
+            # robust defaults
+            offset = float(spec.get("offset", 0.0))
+            thickness_h = float(spec.get("thickness", 0.1))  # half-thickness
+            height = float(spec.get("height", 0.1))
+            collidable = bool(spec.get("collidable", True))
+            density = float(spec.get("density", 1.0))
+            fixed = bool(spec.get("fixed", True))
+
+            # centers for the four sides
+            wx = hx + offset
+            wy = hy + offset
+
+            # half-extents for each rectangle (axis-aligned)
+            # vertical walls: narrow in x, long in y
+            vertical_size = (thickness_h, wy)
+            # horizontal walls: long in x, narrow in y
+            horizontal_size = (wx, thickness_h)
+
+            # place geoms resting on the ground: center z at height/2
+            zc = height * 0.5
+
+            # Some builders look for "centers", others "positions".
+            def _wall_rect(size, center):
+                return dict(
+                    type="rect",
+                    count=1,
+                    size=size,  # half-extents (x_half, y_half)
+                    height=height,  # geom thickness in z
+                    collidable=collidable,
+                    fixed=fixed,
+                    density=density,
+                    centers=[center],  # preferred
+                    positions=[center],  # fallback for older paths
+                )
+
+            rect_specs = [
+                _wall_rect(vertical_size, (-wx, 0.0, zc)),  # left
+                _wall_rect(vertical_size, (wx, 0.0, zc)),  # right
+                _wall_rect(horizontal_size, (0.0, -wy, zc)),  # bottom
+                _wall_rect(horizontal_size, (0.0, wy, zc)),  # top
+            ]
+            resolved.extend(rect_specs)
+            continue
+
+        # Regular hazards: merge with type defaults
+        t = spec.get("type")
+        base = dict(td.get(t, {}))
+        base.update(spec)  # spec overrides defaults
+        resolved.append(base)
+
+    hazards_cfg.specs = resolved
+    return hazards_cfg
 
 
 # -------------------------------- Math --------------------------------

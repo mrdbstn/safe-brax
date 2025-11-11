@@ -1,6 +1,6 @@
 import inspect
 from abc import ABC, abstractmethod
-from typing import List, Dict, Type
+from typing import List, Dict, Type, Tuple
 
 import jax.numpy as jp
 
@@ -8,8 +8,8 @@ import jax.numpy as jp
 class BaseHazard(ABC):
     """Base class for all hazard types."""
 
-    def __init__(self, hazard_id: int, position: tuple, size: float, height: float, collidable: bool, movable: bool,
-                 density: float):
+    def __init__(self, hazard_id: int, position: tuple, size: Tuple[float] | float, height: float, collidable: bool,
+                 fixed: bool, density: float):
         """Initialize a hazard.
 
         Args:
@@ -18,7 +18,7 @@ class BaseHazard(ABC):
             size: Size parameter for the hazard (interpretation depends on hazard type)
             height: Height parameter for the hazard (if applicable)
             collidable: Whether the hazard is collidable
-            movable: Whether the hazard is movable
+            fixed: Whether the hazard should be randomly relocated on reset
             density: Density of the hazard (if movable)
         """
         self.hazard_id = hazard_id
@@ -26,7 +26,7 @@ class BaseHazard(ABC):
         self.size = size
         self.height = height
         self.collidable = collidable
-        self.movable = movable
+        self.fixed = fixed
         self.density = density
         self.mass = self.calculate_mass()
         self.geom_id = -1  # Will be populated by the environment after mj_model is created.
@@ -108,8 +108,8 @@ class CubeHazard(BaseHazard):
     """Cube-shaped hazard with binary collision cost."""
 
     def __init__(self, hazard_id: int, position: tuple = (0.0, 0.0, 0.09), size: float = 0.2, height: float = 0.2,
-                 collidable: bool = True, movable: bool = False, density: float = 1.0):
-        super().__init__(hazard_id, position, size, height, collidable, movable, density)
+                 collidable: bool = True, fixed: bool = False, density: float = 1.0):
+        super().__init__(hazard_id, position, size, height, collidable, fixed, density)
 
     def proximity_cost(self, agent_xy: jp.ndarray, hazard_xy: jp.ndarray) -> jp.ndarray:
         dxdy = jp.abs(agent_xy - hazard_xy)
@@ -144,12 +144,63 @@ class CubeHazard(BaseHazard):
         return float(jp.sqrt(2.0) * self.size)
 
 
+class RectHazard(BaseHazard):
+    """
+    Axis-aligned rectangle hazard (box geom) with independent half-extents in x/y.
+    Interprets `size` as a tuple `(sx, sy)` of half-extents in XY.
+    """
+    def __init__(self,
+                 hazard_id: int,
+                 position: tuple = (0.0, 0.0, 0.02),
+                 size: tuple = (0.5, 0.05),  # (sx, sy)
+                 height: float = 0.02,
+                 collidable: bool = False,
+                 fixed: bool = False,
+                 density: float = 1.0):
+        # normalize size to tuple
+        if not (isinstance(size, (tuple, list)) and len(size) == 2):
+            raise ValueError("RectHazard.size must be a (sx, sy) tuple of half-extents.")
+        self.size_xy = (float(size[0]), float(size[1]))
+        super().__init__(hazard_id, position, size, height, collidable, fixed, density)
+
+    def proximity_cost(self, agent_xy: jp.ndarray, hazard_xy: jp.ndarray) -> jp.ndarray:
+        sx, sy = self.size_xy
+        dxdy = jp.abs(agent_xy - hazard_xy)
+        inside = jp.logical_and(dxdy[0] <= sx, dxdy[1] <= sy)
+        return inside.astype(jp.float32)
+
+    def get_xml_body(self) -> str:
+        x, y, z = self.position
+        sx, sy = self.size_xy
+        sz = float(self.height)
+        return f"""
+        <body name="hazard{self.hazard_id}" pos="{x} {y} {z}" mocap="true">
+            <geom type="box" name="hazard{self.hazard_id}" size="{sx} {sy} {sz}" condim="3"
+                  friction="1 .03 .003" rgba="0.9 0.3 0.3 {self.alpha}" contype="{self.contype}"
+                  conaffinity="{self.conaffinity}" mass="{self.mass}" solref="0.01 1"/>
+        </body>"""
+
+    @property
+    def hazard_type(self) -> str:
+        return "rect"
+
+    def calculate_mass(self) -> float:
+        sx, sy = self.size_xy
+        sz = float(self.height)
+        volume = (2.0 * sx) * (2.0 * sy) * (2.0 * sz)
+        return float(self.density) * volume
+
+    def get_keepout_radius(self) -> float:
+        sx, sy = self.size_xy
+        return float(jp.sqrt(sx * sx + sy * sy))  # circumscribed radius
+
+
 class CylinderHazard(BaseHazard):
     """Cylinder-shaped hazard with distance-based cost."""
 
     def __init__(self, hazard_id: int, position: tuple = (0.0, 0.0, 0.02), size: float = 0.3, height: float = 0.02,
-                 collidable: bool = True, movable: bool = False, density: float = 1.0):
-        super().__init__(hazard_id, position, size, height, collidable, movable, density)
+                 collidable: bool = True, fixed: bool = False, density: float = 1.0):
+        super().__init__(hazard_id, position, size, height, collidable, fixed, density)
 
     def proximity_cost(self, agent_xy: jp.ndarray, hazard_xy: jp.ndarray) -> jp.ndarray:
         diff = agent_xy - hazard_xy
@@ -193,7 +244,7 @@ class HazardManager:
         self.hazards.append(hazard)
 
     def add_hazards(self, hazard_type: str, count: int, positions: List[tuple] = None, size: float = None,
-                    height: float = None, collidable: bool = None, movable: bool = False, density: float = None):
+                    height: float = None, collidable: bool = None, fixed: bool = False, density: float = None):
         """Add multiple hazards of the same type.
 
         Args:
@@ -212,7 +263,7 @@ class HazardManager:
 
         for i in range(count):
             hazard_id = len(self.hazards) + 1
-            hazard = cls(hazard_id, positions[i], size, height, collidable, movable, density)
+            hazard = cls(hazard_id, positions[i], size, height, collidable, fixed, density)
             self.add_hazard(hazard)
 
     def get_xml_assets(self) -> str:
@@ -246,6 +297,10 @@ class HazardManager:
         """Get the total number of hazards."""
         return len(self.hazards)
 
+    def get_fixed_hazard_count(self) -> int:
+        """Get the total number of hazards."""
+        return sum(1 for h in self.hazards if h.fixed)
+
     def get_hazards_by_type(self, hazard_type: str) -> List[BaseHazard]:
         """Get all hazards of a specific type."""
         return [h for h in self.hazards if h.hazard_type == hazard_type]
@@ -254,6 +309,7 @@ class HazardManager:
 HAZARD_REGISTRY: Dict[str, Type[BaseHazard]] = {
     "cube": CubeHazard,
     "cylinder": CylinderHazard,
+    "rect": RectHazard,
 }
 
 
