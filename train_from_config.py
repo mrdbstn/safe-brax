@@ -253,6 +253,7 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
         wandb.init(
             project=wandb_project,
             name=run_name,
+            id=run_name,
             config=wandb_config,
             group=wandb_group,
             job_type=alg_name,
