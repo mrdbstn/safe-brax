@@ -580,7 +580,7 @@ def train(
         )
 
         # Update Lagrange multiplier once per training step based on final cost
-        avg_cost = metrics['mean_cost'][-1]
+        avg_cost = jnp.mean(metrics['mean_cost'][-1])
         cost_violation = avg_cost - safety_bound
         delta_lambda = cost_violation * lagrangian_coef_rate
         updated_lambda_lagr = jax.nn.relu(training_state.lambda_lagr + delta_lambda)
