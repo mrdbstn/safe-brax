@@ -586,7 +586,7 @@ def train(
 
         # --- PID Lagrange update ---
         # avg cost over this training step
-        avg_cost = jnp.mean(metrics['mean_cost'])
+        avg_cost = jnp.mean(metrics['mean_cost'][-1])
         violation = avg_cost - safety_bound                     # shape []
 
         # match shapes [1] everywhere to play nice with pmap
