@@ -43,6 +43,9 @@ notebooks/*_checkpoints/
 run_*.log
 run_*_log_*.txt
 
+# Run data files
+/results/data/
+
 # PID or sentinel files
 .pid_*
 .last_*_pid
