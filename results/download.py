@@ -55,14 +55,20 @@ def store_data(run: Run, args: argparse.Namespace) -> None:
     folder_path = root_dir / args.output / env / algo
     os.makedirs(folder_path, exist_ok=True)  # Ensure the directory exists
 
+    file_path = folder_path / f"seed_{seed}.parquet"
+
+    # Skip if file already exists and overwrite flag not set
+    if file_path.exists() and not args.overwrite:
+        print(f"Skipping existing file: {file_path}")
+        return
+
     try:
         df = run.history(keys=metrics)
         if df is None or df.empty:
             print(f"No history for run {run_id}")
             return
-        file_path = folder_path / f"seed_{seed}.parquet"
-        os.makedirs(folder_path, exist_ok=True)
         df.to_parquet(file_path)
+        print(f"Saved data for run {run_id} to {file_path}")
     except Exception as e:
         print(f"Error downloading data for run: {run_id}: {e}")
         return
@@ -71,7 +77,7 @@ def store_data(run: Run, args: argparse.Namespace) -> None:
 def common_dl_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seeds", type=int, nargs='+', default=[1, 2, 3], help="Seed(s) of the run(s) to download")
-    parser.add_argument("--algos", type=str, nargs='+', default=["ppo", "ppo_cost", "ppo_lag", "ppo_lagrange", "ppo_saute", "ppo_pid", "p3o"],
+    parser.add_argument("--algos", type=str, nargs='+', default=["ppo", "ppo_cost", "ppo_lag", "ppo_saute", "ppo_pid", "p3o"],
                         help="Algorithms to download/plot")
     parser.add_argument("--envs", type=str, nargs='+', help="Environments to download/plot")
     parser.add_argument("--output", type=str, default='data', help="Base output directory to store the data")
