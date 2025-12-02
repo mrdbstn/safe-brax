@@ -179,7 +179,7 @@ def filter_kwargs_for_fn(fn, cfg):
     return {k: v for k, v in cfg.items() if k in valid_keys}
 
 
-def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = True,
+def train_from_config(config: argparse.Namespace, use_wandb: bool = True,
                       verbose: bool = True) -> tuple[Any, Any, Any, Env]:
     """
     Train an agent using the provided configuration.
@@ -196,6 +196,8 @@ def train_from_config(config: argparse.Namespace, seed: int, use_wandb: bool = T
 
     print(f"Training environment '{env_name}' instantiated.")
     print(f"Evaluation environment '{env_name}' instantiated.")
+
+    seed = config.seed
 
     # Setup wandb if requested
     if use_wandb:
@@ -834,10 +836,11 @@ def main():
         print(f"Running experiment with seed {seed}")
         print(f"{'=' * 50}\n")
 
+        config['seed'] = seed  # Monkey-patch seed into config
+
         # Train the agent
         make_inference_fn, params, final_metrics, eval_env = train_from_config(
             config=config,
-            seed=seed,
             use_wandb=config.use_wandb,
             verbose=not config.quiet
         )
