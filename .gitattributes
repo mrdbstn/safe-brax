@@ -1,0 +1,12 @@
+# Normalize all text files to LF in Git
+* text=auto eol=lf
+
+# Be explicit for code
+*.py   text eol=lf
+*.sh   text eol=lf
+*.md   text eol=lf
+
+# Never touch binaries
+*.png  -text
+*.jpg  -text
+*.pdf  -text

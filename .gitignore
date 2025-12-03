@@ -121,3 +121,16 @@ sysinfo.txt
 *.unitypackage
 
 UnitySDK.log
+/videos/
+Safe-Policy-Optimization/
+safety-gymnasium/
+thesis/6873d12a507dfe00bbdae442/
+
+results/hparam_search/*
+
+batchjobs/*
+
+*.pdf
+*.csv
+*.tex
+*.png
