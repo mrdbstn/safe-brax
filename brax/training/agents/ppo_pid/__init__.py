@@ -14,7 +14,6 @@
 
 """PPO-Lagrange training algorithm."""
 
-from brax.training.agents.ppo_lagrange_v2.train import train
-from brax.training.agents.ppo_lagrange_v2 import networks
-from brax.training.agents.ppo_lagrange_v2 import losses
+from brax.training.agents.ppo_pid.train import train
+from brax.training.agents.ppo_pid import losses
 

@@ -19,7 +19,8 @@ __pycache__
 /models/
 /runs/
 /trajectories/
-
+/videos/
+/tests/videos/
 
 
 # Notebook outputs and metrics
@@ -41,6 +42,10 @@ notebooks/*_checkpoints/
 # Top-level run logs
 run_*.log
 run_*_log_*.txt
+
+# Results data processing
+/results/data/
+/results/figures/
 
 # PID or sentinel files
 .pid_*
