@@ -50,11 +50,21 @@ except ImportError:
         train_ppo_cost = None
         RewardMinusCostWrapper = None  # type: ignore
 
+try:
+    from brax.training.agents.ppo_saute import train as ppo_saute
+except ImportError:
+    ppo_saute = None
+
 from brax.training.agents.ppo_lag import train as ppo_lag
 from brax.training.agents.ppo_pid import train as ppo_pid
 from brax.io import model as brax_model
 from brax.io import json as brax_json
 import wandb
+
+try:
+    from brax.envs.wrappers.saute import SauteWrapper as _SauteWrapper
+except Exception:
+    _SauteWrapper = None  # type: ignore
 
 
 # Configure environment for GPU usage
@@ -163,6 +173,7 @@ def get_algorithm_train_fn(alg_name: str):
         'ppo_cost': train_ppo_cost,
         'ppo_lag': ppo_lag,
         'ppo_pid': ppo_pid,
+        'ppo_saute': ppo_saute,
     }
 
     train_fn = alg_map.get(alg_name)
@@ -804,6 +815,13 @@ def main():
     parser.add_argument("--pid_integral_clip", type=float, default=10.0, help="PID: anti-windup cap for integral term")
     parser.add_argument("--pid_lambda_clip", type=float, default=1e6, help="PID: clamp for lambda")
     parser.add_argument("--pid_deriv_ema_beta", type=float, default=0.95, help="PID: derivative EMA smoothing")
+
+    # --- PPO-Saute ---
+    parser.add_argument("--saute-initial-budget", dest="initial_budget", type=float, default=15.0, help="Initial discounted safety budget b0")
+    parser.add_argument("--saute-gamma-budget", dest="gamma_budget", type=float, default=None, help="Budget discount factor; defaults to --discounting if None")
+    parser.add_argument("--saute-termination-on-violation", dest="termination_on_violation", type=int, default=1, help="Terminate episode on budget violation (1/0)")
+    parser.add_argument("--saute-violation-penalty", dest="violation_penalty", type=float, default=0.0, help="Optional terminal penalty added only on violation step")
+    parser.add_argument("--saute-normalize-budget-obs", dest="normalize_budget_obs", type=int, default=1, help="Normalize budget observation by initial budget")
 
     # --- PPO-Cost verification ---
     parser.add_argument("--ppoc-verify-log-steps", type=int, default=0,
