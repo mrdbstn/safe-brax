@@ -72,29 +72,46 @@ class SauteWrapper(Wrapper):
         return state.replace(obs=obs, info=info, metrics=metrics)
 
     def step(self, state: State, action: jnp.ndarray) -> State:
+        # Step underlying env
         next_state = self.env.step(state, action)
         info = next_state.info.copy()
 
         # Cost signal (default 0 if missing)
         cost = info.get('cost', jnp.zeros_like(next_state.reward))
 
-        # Previous budget (default to full budget if missing, e.g. after some weird reset)
-        b_prev = state.info.get(
+        # Did the *previous* state mark an episode end? (EpisodeWrapper's done)
+        done_prev = state.done.astype(jnp.bool_)
+
+        # Previous budget (fallback to full budget if missing)
+        b_prev_raw = state.info.get(
             'saute_budget',
             jnp.ones_like(next_state.reward) * self._b0,
+            )
+
+        # If previous step was done, start a fresh budget at b0 for the new episode
+        b_prev = jnp.where(
+            done_prev,
+            jnp.ones_like(b_prev_raw) * self._b0,
+            b_prev_raw,
+            )
+
+        # Sauté update: b̃_{t+1} = (b_t - c_t) / gamma
+        b_candidate = (b_prev - cost) / self._gamma
+
+        # Budget violation check on the candidate value
+        violated = b_candidate < 0.0
+
+        # Clamp budget to [0, +∞) to avoid huge negative values after violation
+        b_next = jnp.where(
+            violated,
+            jnp.zeros_like(b_candidate),
+            b_candidate,
         )
 
-        # Sauté update: b_{t+1} = (b_t - c_t) / gamma
-        b_next = (b_prev - cost) / self._gamma
-
-        # Budget violation
-        violated = b_next < 0.0
-
+        # Termination on violation, but keep dtype consistent with env
         base_done = next_state.done
         base_dtype = base_done.dtype
-
         if self._terminate:
-            # Work in bool, then cast back to the env's dtype
             done_bool = jnp.logical_or(
                 base_done.astype(jnp.bool_),
                 violated,
@@ -123,7 +140,7 @@ class SauteWrapper(Wrapper):
         return next_state.replace(
             obs=obs,
             reward=reward,
-            done=done,  # keep as bool
+            done=done,
             info=info,
             metrics=metrics,
         )
